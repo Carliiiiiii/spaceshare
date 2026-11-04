@@ -31,6 +31,8 @@ def connect(database_path: Path) -> sqlite3.Connection:
             price_per_month_eur REAL NOT NULL,
             available_from TEXT NOT NULL,
             available_until TEXT,
+            photo_data BLOB,
+            photo_mime_type TEXT,
             minimum_rental_days INTEGER NOT NULL,
             FOREIGN KEY (owner_id) REFERENCES users (id)
         )
@@ -41,6 +43,10 @@ def connect(database_path: Path) -> sqlite3.Connection:
     }
     if "available_until" not in listing_columns:
         connection.execute("ALTER TABLE listings ADD COLUMN available_until TEXT")
+    if "photo_data" not in listing_columns:
+        connection.execute("ALTER TABLE listings ADD COLUMN photo_data BLOB")
+    if "photo_mime_type" not in listing_columns:
+        connection.execute("ALTER TABLE listings ADD COLUMN photo_mime_type TEXT")
     connection.commit()
     return connection
 
@@ -79,6 +85,8 @@ def create_listing(
     available_from: str,
     minimum_rental_days: int,
     available_until: Optional[str] = None,
+    photo_data: Optional[bytes] = None,
+    photo_mime_type: Optional[str] = None,
 ) -> int:
     """Store one storage listing and return its id."""
     cursor = connection.execute(
@@ -86,8 +94,8 @@ def create_listing(
         INSERT INTO listings (
             owner_id, title, city, description, size_sqm,
             price_per_month_eur, available_from, available_until,
-            minimum_rental_days
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            photo_data, photo_mime_type, minimum_rental_days
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             owner_id,
@@ -98,6 +106,8 @@ def create_listing(
             price_per_month_eur,
             available_from,
             available_until,
+            photo_data,
+            photo_mime_type,
             minimum_rental_days,
         ),
     )
@@ -111,6 +121,7 @@ def get_listings(connection: sqlite3.Connection) -> list:
         """
         SELECT id, title, city, description, size_sqm,
                price_per_month_eur, available_from, available_until,
+               photo_data, photo_mime_type,
                minimum_rental_days
         FROM listings
         ORDER BY id DESC
@@ -124,6 +135,7 @@ def get_listings_by_owner(connection: sqlite3.Connection, owner_id: int) -> list
         """
         SELECT id, title, city, description, size_sqm,
                price_per_month_eur, available_from, available_until,
+               photo_data, photo_mime_type,
                minimum_rental_days
         FROM listings
         WHERE owner_id = ?
@@ -145,6 +157,8 @@ def update_listing(
     available_from: str,
     minimum_rental_days: int,
     available_until: Optional[str] = None,
+    photo_data: Optional[bytes] = None,
+    photo_mime_type: Optional[str] = None,
 ) -> None:
     """Update a listing only when the supplied owner owns it."""
     cursor = connection.execute(
@@ -152,7 +166,8 @@ def update_listing(
         UPDATE listings
         SET title = ?, city = ?, description = ?, size_sqm = ?,
             price_per_month_eur = ?, available_from = ?,
-            available_until = ?, minimum_rental_days = ?
+            available_until = ?, photo_data = ?, photo_mime_type = ?,
+            minimum_rental_days = ?
         WHERE id = ? AND owner_id = ?
         """,
         (
@@ -163,6 +178,8 @@ def update_listing(
             price_per_month_eur,
             available_from,
             available_until,
+            photo_data,
+            photo_mime_type,
             minimum_rental_days,
             listing_id,
             owner_id,

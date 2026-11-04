@@ -1,6 +1,8 @@
 import sqlite3
+from io import BytesIO
 
 import pytest
+from PIL import Image
 
 import db
 from logic import (
@@ -10,6 +12,13 @@ from logic import (
     update_listing,
     verify_user_password,
 )
+
+
+def make_png() -> bytes:
+    image = Image.new("RGB", (2, 2), color="red")
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 @pytest.fixture
@@ -230,3 +239,84 @@ def test_owner_can_update_and_delete_listing(connection):
 
     delete_listing(connection, owner_id, listing_id)
     assert db.get_listings(connection) == []
+
+
+def test_owner_can_store_replace_and_remove_photo(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+    first_photo = make_png()
+    listing_id = create_listing(
+        connection,
+        owner_id,
+        "Photo listing",
+        "Lisbon",
+        "A listing with a photo.",
+        10,
+        50,
+        "2026-12-01",
+        30,
+        None,
+        first_photo,
+        "image/png",
+    )
+    listing = db.get_listings(connection)[0]
+    assert listing["photo_data"] == first_photo
+    assert listing["photo_mime_type"] == "image/png"
+
+    second_photo = make_png()
+    update_listing(
+        connection,
+        owner_id,
+        listing_id,
+        "Photo listing",
+        "Lisbon",
+        "Updated photo.",
+        10,
+        50,
+        "2026-12-01",
+        30,
+        None,
+        second_photo,
+        "image/png",
+    )
+    assert db.get_listings(connection)[0]["photo_data"] == second_photo
+
+    update_listing(
+        connection,
+        owner_id,
+        listing_id,
+        "Photo listing",
+        "Lisbon",
+        "Photo removed.",
+        10,
+        50,
+        "2026-12-01",
+        30,
+        None,
+        None,
+        None,
+    )
+    assert db.get_listings(connection)[0]["photo_data"] is None
+
+
+@pytest.mark.parametrize(
+    "photo_data",
+    [b"not an image", b"x" * (5 * 1024 * 1024 + 1)],
+)
+def test_listing_rejects_invalid_or_oversized_photo(connection, photo_data):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+
+    with pytest.raises(ValueError):
+        create_listing(
+            connection,
+            owner_id,
+            "Photo listing",
+            "Lisbon",
+            "A listing.",
+            10,
+            50,
+            "2026-12-01",
+            30,
+            None,
+            photo_data,
+            "image/png",
+        )

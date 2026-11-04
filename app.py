@@ -76,6 +76,10 @@ def show_listing_form(connection, user_email):
         price = st.number_input("Price per month in €", min_value=0.0, step=1.0)
         available_from = st.date_input("Available from")
         available_until = st.date_input("Available until (optional)", value=None)
+        uploaded_photo = st.file_uploader(
+            "Photo (optional, JPG or PNG, max 5 MB)",
+            type=["jpg", "jpeg", "png"],
+        )
         minimum_days = st.number_input(
             "Minimum rental duration in days", min_value=0, step=1
         )
@@ -94,6 +98,8 @@ def show_listing_form(connection, user_email):
                 available_from.isoformat(),
                 minimum_days,
                 available_until.isoformat() if available_until else None,
+                uploaded_photo.getvalue() if uploaded_photo else None,
+                uploaded_photo.type if uploaded_photo else None,
             )
         except ValueError as error:
             st.error(str(error))
@@ -111,6 +117,10 @@ def show_listings(connection):
     for listing in listings:
         with st.container(border=True):
             st.markdown(f"### {listing['title']}")
+            if listing["photo_data"]:
+                st.image(listing["photo_data"], caption=listing["title"])
+            else:
+                st.info("No photo available.")
             st.write(f"**City:** {listing['city']}")
             st.write(listing["description"])
             st.write(
@@ -159,6 +169,17 @@ def show_my_listings(connection, owner_id):
                         else None
                     ),
                 )
+                if listing["photo_data"]:
+                    st.image(listing["photo_data"], caption="Current photo")
+                uploaded_photo = st.file_uploader(
+                    "Replace photo (optional)",
+                    type=["jpg", "jpeg", "png"],
+                    key=f"photo_upload_{listing['id']}",
+                )
+                remove_photo = st.checkbox(
+                    "Remove current photo",
+                    key=f"photo_remove_{listing['id']}",
+                )
                 minimum_days = st.number_input(
                     "Minimum rental duration in days",
                     min_value=0,
@@ -181,6 +202,20 @@ def show_my_listings(connection, owner_id):
                         available_from.isoformat(),
                         minimum_days,
                         available_until.isoformat() if available_until else None,
+                        (
+                            uploaded_photo.getvalue()
+                            if uploaded_photo
+                            else listing["photo_data"]
+                        )
+                        if not remove_photo
+                        else None,
+                        (
+                            uploaded_photo.type
+                            if uploaded_photo
+                            else listing["photo_mime_type"]
+                        )
+                        if not remove_photo
+                        else None,
                     )
                 except ValueError as error:
                     st.error(str(error))

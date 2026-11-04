@@ -2,15 +2,18 @@
 
 import sqlite3
 from datetime import date
+from io import BytesIO
 from typing import Optional
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
+from PIL import Image, UnidentifiedImageError
 
 import db
 
 
 password_hasher = PasswordHasher()
+MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024
 
 
 def normalize_email(email: str) -> str:
@@ -62,6 +65,8 @@ def create_listing(
     available_from: str,
     minimum_rental_days: int,
     available_until: Optional[str] = None,
+    photo_data: Optional[bytes] = None,
+    photo_mime_type: Optional[str] = None,
 ) -> int:
     """Validate and create a listing for an authenticated owner."""
     values = _validated_listing_values(
@@ -74,7 +79,33 @@ def create_listing(
         minimum_rental_days,
         available_until,
     )
-    return db.create_listing(connection, owner_id, *values)
+    photo_data, photo_mime_type = validate_photo(photo_data, photo_mime_type)
+    return db.create_listing(
+        connection, owner_id, *values, photo_data, photo_mime_type
+    )
+
+
+def validate_photo(
+    photo_data: Optional[bytes], photo_mime_type: Optional[str]
+) -> tuple:
+    """Validate an optional JPG or PNG and return safe storage values."""
+    if photo_data is None:
+        return None, None
+    if len(photo_data) > MAX_PHOTO_SIZE_BYTES:
+        raise ValueError("Photo must be 5 MB or smaller.")
+
+    try:
+        with Image.open(BytesIO(photo_data)) as image:
+            image.verify()
+        with Image.open(BytesIO(photo_data)) as image:
+            image_format = image.format
+    except (UnidentifiedImageError, OSError) as error:
+        raise ValueError("Photo must be a valid JPG or PNG image.") from error
+
+    mime_types = {"JPEG": "image/jpeg", "PNG": "image/png"}
+    if image_format not in mime_types:
+        raise ValueError("Photo must be a valid JPG or PNG image.")
+    return photo_data, mime_types[image_format]
 
 
 def _validated_listing_values(
@@ -145,6 +176,8 @@ def update_listing(
     available_from: str,
     minimum_rental_days: int,
     available_until: Optional[str] = None,
+    photo_data: Optional[bytes] = None,
+    photo_mime_type: Optional[str] = None,
 ) -> None:
     """Validate and update a listing only for its owner."""
     values = _validated_listing_values(
@@ -157,7 +190,15 @@ def update_listing(
         minimum_rental_days,
         available_until,
     )
-    db.update_listing(connection, listing_id, owner_id, *values)
+    photo_data, photo_mime_type = validate_photo(photo_data, photo_mime_type)
+    db.update_listing(
+        connection,
+        listing_id,
+        owner_id,
+        *values,
+        photo_data,
+        photo_mime_type,
+    )
 
 
 def delete_listing(
