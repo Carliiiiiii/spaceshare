@@ -21,10 +21,12 @@ The app currently supports:
 - optional JPG or PNG photos up to 5 MB;
 - validation that uploaded files are real JPG or PNG images;
 - photo replacement and removal for the listing owner;
-- public listing display with a placeholder when no photo exists.
+- public listing display with a placeholder when no photo exists;
+- public browsing before login, with optional filters for city, minimum size,
+  maximum monthly price, and availability on a selected date.
 
-There is no booking, payment, chat, contact-email workflow, filtering,
-listing detail page, or photo storage service yet.
+There is no booking, payment, chat, contact-email workflow, listing detail
+page, or photo storage service yet.
 
 ## Local setup and start
 
@@ -52,19 +54,21 @@ uv run pytest -q
 
 The tests use temporary SQLite databases and currently cover registration,
 password verification, persistence, listing validation, date validation,
-ownership permissions, listing updates/deletions, and photo validation and
-persistence.
+ownership permissions, listing updates/deletions, photo validation and
+persistence, and public listing filters.
 
 ## Manual browser checks
 
-1. Register an account and log in.
-2. Create a listing without a photo and check that the placeholder is shown.
-3. Create another listing with a JPG or PNG photo smaller than 5 MB.
-4. Open `My listings`, replace the photo, save, and verify the new image.
-5. Remove the photo and verify the placeholder returns.
-6. Create a second account and verify it cannot see or manage the first
+1. Without logging in, browse the listing overview and try the city, minimum
+   size, maximum price, and availability-date filters.
+2. Register an account and log in.
+3. Create a listing without a photo and check that the placeholder is shown.
+4. Create another listing with a JPG or PNG photo smaller than 5 MB.
+5. Open `My listings`, replace the photo, save, and verify the new image.
+6. Remove the photo and verify the placeholder returns.
+7. Create a second account and verify it cannot see or manage the first
    account's listings in `My listings`.
-7. Restart Streamlit and confirm that accounts, listings, and photos persist.
+8. Restart Streamlit and confirm that accounts, listings, and photos persist.
 
 ## Open points
 
@@ -75,8 +79,8 @@ persistence.
   photos should move to an object-storage service, with only a reference kept
   in the database.
 - Add deployment configuration and verify HTTPS, backups, and data retention.
-- Consider adding a city filter, a listing detail page, contact by email, and
-  later booking features as separate small steps.
+- Consider adding a listing detail page, contact by email, and later booking
+  features as separate small steps.
 
 ## Repository and data safety
 

@@ -115,18 +115,45 @@ def create_listing(
     return int(cursor.lastrowid)
 
 
-def get_listings(connection: sqlite3.Connection) -> list:
-    """Return public listing fields without account data."""
-    return connection.execute(
-        """
+def get_listings(
+    connection: sqlite3.Connection,
+    *,
+    city: Optional[str] = None,
+    minimum_size_sqm: Optional[float] = None,
+    maximum_price_per_month_eur: Optional[float] = None,
+    available_on: Optional[str] = None,
+) -> list:
+    """Return public listing fields, optionally limited by browse filters."""
+    filters = []
+    parameters = []
+
+    if city is not None and city.strip():
+        filters.append("LOWER(city) LIKE ?")
+        parameters.append(f"%{city.strip().lower()}%")
+    if minimum_size_sqm is not None:
+        filters.append("size_sqm >= ?")
+        parameters.append(minimum_size_sqm)
+    if maximum_price_per_month_eur is not None:
+        filters.append("price_per_month_eur <= ?")
+        parameters.append(maximum_price_per_month_eur)
+    if available_on is not None:
+        filters.append(
+            "available_from <= ? "
+            "AND (available_until IS NULL OR available_until >= ?)"
+        )
+        parameters.extend((available_on, available_on))
+
+    query = """
         SELECT id, title, city, description, size_sqm,
                price_per_month_eur, available_from, available_until,
                photo_data, photo_mime_type,
                minimum_rental_days
         FROM listings
-        ORDER BY id DESC
-        """
-    ).fetchall()
+    """
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
+    query += " ORDER BY id DESC"
+    return connection.execute(query, parameters).fetchall()
 
 
 def get_listings_by_owner(connection: sqlite3.Connection, owner_id: int) -> list:

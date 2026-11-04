@@ -1,4 +1,4 @@
-"""Streamlit interface for SpaceShare account access."""
+"""Streamlit interface for browsing and managing SpaceShare listings."""
 
 from pathlib import Path
 from datetime import date
@@ -109,11 +109,63 @@ def show_listing_form(connection, user_email):
 
 def show_listings(connection):
     st.subheader("Available storage listings")
-    listings = db.get_listings(connection)
+    filter_columns = st.columns(4)
+    with filter_columns[0]:
+        city = st.text_input(
+            "City",
+            placeholder="Any city",
+            key="listing_filter_city",
+        )
+    with filter_columns[1]:
+        minimum_size_sqm = st.number_input(
+            "Minimum size in m²",
+            min_value=0.0,
+            value=None,
+            step=1.0,
+            placeholder="Any size",
+            key="listing_filter_minimum_size",
+        )
+    with filter_columns[2]:
+        maximum_price_per_month_eur = st.number_input(
+            "Maximum monthly price in €",
+            min_value=0.0,
+            value=None,
+            step=1.0,
+            placeholder="Any price",
+            key="listing_filter_maximum_price",
+        )
+    with filter_columns[3]:
+        available_on = st.date_input(
+            "Available on",
+            value=None,
+            help="Show spaces available on the selected date.",
+            key="listing_filter_available_on",
+        )
+
+    listings = db.get_listings(
+        connection,
+        city=city,
+        minimum_size_sqm=minimum_size_sqm,
+        maximum_price_per_month_eur=maximum_price_per_month_eur,
+        available_on=available_on.isoformat() if available_on else None,
+    )
     if not listings:
-        st.info("No listings yet.")
+        has_filters = any(
+            (
+                city.strip(),
+                minimum_size_sqm is not None,
+                maximum_price_per_month_eur is not None,
+                available_on is not None,
+            )
+        )
+        st.info(
+            "No listings match these filters."
+            if has_filters
+            else "No listings yet."
+        )
         return
 
+    st.caption(f"{len(listings)} listing{'s' if len(listings) != 1 else ''} found")
     for listing in listings:
         with st.container(border=True):
             st.markdown(f"### {listing['title']}")
@@ -258,7 +310,11 @@ def main():
                 st.rerun()
             return
 
-        register_tab, login_tab = st.tabs(["Register", "Log in"])
+        browse_tab, register_tab, login_tab = st.tabs(
+            ["Browse listings", "Register", "Log in"]
+        )
+        with browse_tab:
+            show_listings(connection)
         with register_tab:
             show_registration(connection)
         with login_tab:
