@@ -1,6 +1,8 @@
 """Validation and authentication rules for SpaceShare accounts."""
 
 import sqlite3
+from datetime import date
+from typing import Optional
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
@@ -59,8 +61,33 @@ def create_listing(
     price_per_month_eur: float,
     available_from: str,
     minimum_rental_days: int,
+    available_until: Optional[str] = None,
 ) -> int:
     """Validate and create a listing for an authenticated owner."""
+    values = _validated_listing_values(
+        title,
+        city,
+        description,
+        size_sqm,
+        price_per_month_eur,
+        available_from,
+        minimum_rental_days,
+        available_until,
+    )
+    return db.create_listing(connection, owner_id, *values)
+
+
+def _validated_listing_values(
+    title: str,
+    city: str,
+    description: str,
+    size_sqm: float,
+    price_per_month_eur: float,
+    available_from: str,
+    minimum_rental_days: int,
+    available_until: Optional[str],
+) -> tuple:
+    """Validate and normalize fields shared by create and update."""
     required_fields = {
         "Title": title,
         "City": city,
@@ -78,9 +105,23 @@ def create_listing(
     if minimum_rental_days <= 0:
         raise ValueError("Minimum rental duration must be positive.")
 
-    return db.create_listing(
-        connection,
-        owner_id,
+    try:
+        start_date = date.fromisoformat(available_from.strip())
+    except ValueError as error:
+        raise ValueError("Available from must be a valid date.") from error
+
+    if available_until is not None:
+        available_until = available_until.strip()
+        try:
+            end_date = date.fromisoformat(available_until)
+        except ValueError as error:
+            raise ValueError("Available until must be a valid date.") from error
+        if end_date < start_date:
+            raise ValueError("Available until cannot be before Available from.")
+        if (end_date - start_date).days < minimum_rental_days:
+            raise ValueError("Minimum rental duration does not fit the available period.")
+
+    return (
         title.strip(),
         city.strip(),
         description.strip(),
@@ -88,4 +129,39 @@ def create_listing(
         price_per_month_eur,
         available_from.strip(),
         minimum_rental_days,
+        available_until,
     )
+
+
+def update_listing(
+    connection: sqlite3.Connection,
+    owner_id: int,
+    listing_id: int,
+    title: str,
+    city: str,
+    description: str,
+    size_sqm: float,
+    price_per_month_eur: float,
+    available_from: str,
+    minimum_rental_days: int,
+    available_until: Optional[str] = None,
+) -> None:
+    """Validate and update a listing only for its owner."""
+    values = _validated_listing_values(
+        title,
+        city,
+        description,
+        size_sqm,
+        price_per_month_eur,
+        available_from,
+        minimum_rental_days,
+        available_until,
+    )
+    db.update_listing(connection, listing_id, owner_id, *values)
+
+
+def delete_listing(
+    connection: sqlite3.Connection, owner_id: int, listing_id: int
+) -> None:
+    """Delete a listing only for its owner."""
+    db.delete_listing(connection, listing_id, owner_id)

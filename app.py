@@ -1,11 +1,18 @@
 """Streamlit interface for SpaceShare account access."""
 
 from pathlib import Path
+from datetime import date
 
 import streamlit as st
 
 import db
-from logic import create_listing, register_user, verify_user_password
+from logic import (
+    create_listing,
+    delete_listing,
+    register_user,
+    update_listing,
+    verify_user_password,
+)
 
 
 DATABASE_PATH = Path("spaceshare.sqlite3")
@@ -68,6 +75,7 @@ def show_listing_form(connection, user_email):
         size_sqm = st.number_input("Size in m²", min_value=0.0, step=1.0)
         price = st.number_input("Price per month in €", min_value=0.0, step=1.0)
         available_from = st.date_input("Available from")
+        available_until = st.date_input("Available until (optional)", value=None)
         minimum_days = st.number_input(
             "Minimum rental duration in days", min_value=0, step=1
         )
@@ -85,6 +93,7 @@ def show_listing_form(connection, user_email):
                 price,
                 available_from.isoformat(),
                 minimum_days,
+                available_until.isoformat() if available_until else None,
             )
         except ValueError as error:
             st.error(str(error))
@@ -110,10 +119,89 @@ def show_listings(connection):
             )
             st.write(
                 f"**Available from:** {listing['available_from']}  |  "
+                f"**Available until:** {listing['available_until'] or 'Unlimited'}  |  "
                 f"**Minimum rental duration:** {listing['minimum_rental_days']} days"
             )
 
 
+def show_my_listings(connection, owner_id):
+    st.subheader("My listings")
+    listings = db.get_listings_by_owner(connection, owner_id)
+    if not listings:
+        st.info("You have no listings yet.")
+        return
+
+    for listing in listings:
+        with st.expander(listing["title"]):
+            with st.form(f"edit_listing_{listing['id']}"):
+                title = st.text_input("Title", value=listing["title"])
+                city = st.text_input("City", value=listing["city"])
+                description = st.text_area(
+                    "Description", value=listing["description"]
+                )
+                size_sqm = st.number_input(
+                    "Size in m²", min_value=0.0, value=float(listing["size_sqm"]), step=1.0
+                )
+                price = st.number_input(
+                    "Price per month in €",
+                    min_value=0.0,
+                    value=float(listing["price_per_month_eur"]),
+                    step=1.0,
+                )
+                available_from = st.date_input(
+                    "Available from", value=date.fromisoformat(listing["available_from"])
+                )
+                available_until = st.date_input(
+                    "Available until (optional)",
+                    value=(
+                        date.fromisoformat(listing["available_until"])
+                        if listing["available_until"]
+                        else None
+                    ),
+                )
+                minimum_days = st.number_input(
+                    "Minimum rental duration in days",
+                    min_value=0,
+                    value=int(listing["minimum_rental_days"]),
+                    step=1,
+                )
+                update_submitted = st.form_submit_button("Save changes")
+
+            if update_submitted:
+                try:
+                    update_listing(
+                        connection,
+                        owner_id,
+                        listing["id"],
+                        title,
+                        city,
+                        description,
+                        size_sqm,
+                        price,
+                        available_from.isoformat(),
+                        minimum_days,
+                        available_until.isoformat() if available_until else None,
+                    )
+                except ValueError as error:
+                    st.error(str(error))
+                else:
+                    st.success("Listing updated.")
+
+            with st.form(f"delete_listing_{listing['id']}"):
+                confirmed = st.checkbox("I understand that this cannot be undone.")
+                delete_submitted = st.form_submit_button("Delete listing")
+
+            if delete_submitted:
+                if not confirmed:
+                    st.error("Please confirm the deletion first.")
+                else:
+                    try:
+                        delete_listing(connection, owner_id, listing["id"])
+                    except PermissionError as error:
+                        st.error(str(error))
+                    else:
+                        st.success("Listing deleted.")
+                        st.rerun()
 def main():
     st.set_page_config(page_title="SpaceShare", page_icon="📦")
     st.title("SpaceShare")
@@ -126,6 +214,9 @@ def main():
         if user_email:
             st.success(f"Welcome, {user_email}!")
             show_listing_form(connection, user_email)
+            user = db.get_user_by_email(connection, user_email)
+            if user is not None:
+                show_my_listings(connection, user["id"])
             show_listings(connection)
             if st.button("Log out"):
                 del st.session_state["user_email"]

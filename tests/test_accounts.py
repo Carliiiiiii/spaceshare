@@ -3,7 +3,13 @@ import sqlite3
 import pytest
 
 import db
-from logic import create_listing, register_user, verify_user_password
+from logic import (
+    create_listing,
+    delete_listing,
+    register_user,
+    update_listing,
+    verify_user_password,
+)
 
 
 @pytest.fixture
@@ -76,6 +82,7 @@ def test_authenticated_user_can_create_and_reopen_listing(tmp_path):
         80.0,
         "2026-12-01",
         30,
+        "2027-01-15",
     )
     first_connection.close()
 
@@ -84,6 +91,7 @@ def test_authenticated_user_can_create_and_reopen_listing(tmp_path):
         listings = db.get_listings(second_connection)
         assert len(listings) == 1
         assert listings[0]["title"] == "Dry and secure garage"
+        assert listings[0]["available_until"] == "2027-01-15"
         assert "owner@example.com" not in dict(listings[0]).values()
     finally:
         second_connection.close()
@@ -104,3 +112,121 @@ def test_listing_validation_rejects_invalid_values(connection, values):
     owner_id = register_user(connection, "owner@example.com", "secret")
     with pytest.raises(ValueError):
         create_listing(connection, owner_id, *values)
+
+
+def test_listing_without_end_date_is_unlimited(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+
+    create_listing(
+        connection,
+        owner_id,
+        "Storage room",
+        "Lisbon",
+        "A dry room.",
+        8,
+        40,
+        "2026-12-01",
+        30,
+    )
+
+    assert db.get_listings(connection)[0]["available_until"] is None
+
+
+def test_listing_end_date_must_fit_period(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+
+    with pytest.raises(ValueError):
+        create_listing(
+            connection,
+            owner_id,
+            "Storage room",
+            "Lisbon",
+            "A dry room.",
+            8,
+            40,
+            "2026-12-10",
+            30,
+            "2026-12-20",
+        )
+
+    with pytest.raises(ValueError):
+        create_listing(
+            connection,
+            owner_id,
+            "Storage room",
+            "Lisbon",
+            "A dry room.",
+            8,
+            40,
+            "2026-12-10",
+            5,
+            "2026-12-01",
+        )
+
+
+def test_only_owner_can_update_or_delete_listing(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+    other_user_id = register_user(connection, "other@example.com", "secret")
+    listing_id = create_listing(
+        connection,
+        owner_id,
+        "Owner listing",
+        "Lisbon",
+        "Original description",
+        10,
+        50,
+        "2026-12-01",
+        30,
+    )
+
+    with pytest.raises(PermissionError):
+        update_listing(
+            connection,
+            other_user_id,
+            listing_id,
+            "Changed by another user",
+            "Porto",
+            "Should be rejected",
+            20,
+            70,
+            "2026-12-01",
+            30,
+        )
+    with pytest.raises(PermissionError):
+        delete_listing(connection, other_user_id, listing_id)
+
+    listing = db.get_listings(connection)[0]
+    assert listing["title"] == "Owner listing"
+
+
+def test_owner_can_update_and_delete_listing(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+    listing_id = create_listing(
+        connection,
+        owner_id,
+        "Original title",
+        "Lisbon",
+        "Original description",
+        10,
+        50,
+        "2026-12-01",
+        30,
+    )
+
+    update_listing(
+        connection,
+        owner_id,
+        listing_id,
+        "Updated title",
+        "Porto",
+        "Updated description",
+        12,
+        60,
+        "2026-12-10",
+        20,
+        "2027-01-15",
+    )
+    assert db.get_listings(connection)[0]["title"] == "Updated title"
+
+    delete_listing(connection, owner_id, listing_id)
+    assert db.get_listings(connection) == []

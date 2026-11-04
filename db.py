@@ -30,11 +30,17 @@ def connect(database_path: Path) -> sqlite3.Connection:
             size_sqm REAL NOT NULL,
             price_per_month_eur REAL NOT NULL,
             available_from TEXT NOT NULL,
+            available_until TEXT,
             minimum_rental_days INTEGER NOT NULL,
             FOREIGN KEY (owner_id) REFERENCES users (id)
         )
         """
     )
+    listing_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(listings)")
+    }
+    if "available_until" not in listing_columns:
+        connection.execute("ALTER TABLE listings ADD COLUMN available_until TEXT")
     connection.commit()
     return connection
 
@@ -72,14 +78,16 @@ def create_listing(
     price_per_month_eur: float,
     available_from: str,
     minimum_rental_days: int,
+    available_until: Optional[str] = None,
 ) -> int:
     """Store one storage listing and return its id."""
     cursor = connection.execute(
         """
         INSERT INTO listings (
             owner_id, title, city, description, size_sqm,
-            price_per_month_eur, available_from, minimum_rental_days
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            price_per_month_eur, available_from, available_until,
+            minimum_rental_days
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             owner_id,
@@ -89,6 +97,7 @@ def create_listing(
             size_sqm,
             price_per_month_eur,
             available_from,
+            available_until,
             minimum_rental_days,
         ),
     )
@@ -101,8 +110,79 @@ def get_listings(connection: sqlite3.Connection) -> list:
     return connection.execute(
         """
         SELECT id, title, city, description, size_sqm,
-               price_per_month_eur, available_from, minimum_rental_days
+               price_per_month_eur, available_from, available_until,
+               minimum_rental_days
         FROM listings
         ORDER BY id DESC
         """
     ).fetchall()
+
+
+def get_listings_by_owner(connection: sqlite3.Connection, owner_id: int) -> list:
+    """Return listings owned by one account."""
+    return connection.execute(
+        """
+        SELECT id, title, city, description, size_sqm,
+               price_per_month_eur, available_from, available_until,
+               minimum_rental_days
+        FROM listings
+        WHERE owner_id = ?
+        ORDER BY id DESC
+        """,
+        (owner_id,),
+    ).fetchall()
+
+
+def update_listing(
+    connection: sqlite3.Connection,
+    listing_id: int,
+    owner_id: int,
+    title: str,
+    city: str,
+    description: str,
+    size_sqm: float,
+    price_per_month_eur: float,
+    available_from: str,
+    minimum_rental_days: int,
+    available_until: Optional[str] = None,
+) -> None:
+    """Update a listing only when the supplied owner owns it."""
+    cursor = connection.execute(
+        """
+        UPDATE listings
+        SET title = ?, city = ?, description = ?, size_sqm = ?,
+            price_per_month_eur = ?, available_from = ?,
+            available_until = ?, minimum_rental_days = ?
+        WHERE id = ? AND owner_id = ?
+        """,
+        (
+            title,
+            city,
+            description,
+            size_sqm,
+            price_per_month_eur,
+            available_from,
+            available_until,
+            minimum_rental_days,
+            listing_id,
+            owner_id,
+        ),
+    )
+    if cursor.rowcount != 1:
+        connection.rollback()
+        raise PermissionError("You do not own this listing.")
+    connection.commit()
+
+
+def delete_listing(
+    connection: sqlite3.Connection, listing_id: int, owner_id: int
+) -> None:
+    """Delete a listing only when the supplied owner owns it."""
+    cursor = connection.execute(
+        "DELETE FROM listings WHERE id = ? AND owner_id = ?",
+        (listing_id, owner_id),
+    )
+    if cursor.rowcount != 1:
+        connection.rollback()
+        raise PermissionError("You do not own this listing.")
+    connection.commit()
