@@ -206,3 +206,39 @@ def delete_listing(
 ) -> None:
     """Delete a listing only for its owner."""
     db.delete_listing(connection, listing_id, owner_id)
+
+
+def create_rental_request(connection, listing_id, requester_id, start_date, end_date):
+    listing = connection.execute(
+        "SELECT owner_id, available_from, available_until, minimum_rental_days FROM listings WHERE id = ?",
+        (listing_id,),
+    ).fetchone()
+    if listing is None:
+        raise ValueError("Listing not found.")
+    if listing["owner_id"] == requester_id:
+        raise PermissionError("You cannot request your own listing.")
+    try:
+        requested_start = date.fromisoformat(start_date.strip())
+        requested_end = date.fromisoformat(end_date.strip())
+        available_from = date.fromisoformat(listing["available_from"])
+    except (AttributeError, ValueError) as error:
+        raise ValueError("Rental dates must be valid dates.") from error
+    if requested_end < requested_start:
+        raise ValueError("End date cannot be before start date.")
+    if requested_start < available_from:
+        raise ValueError("Start date is before the listing becomes available.")
+    if listing["available_until"] is not None:
+        if requested_end > date.fromisoformat(listing["available_until"]):
+            raise ValueError("End date is after the listing's availability.")
+    if (requested_end - requested_start).days < listing["minimum_rental_days"]:
+        raise ValueError("The requested period is shorter than the minimum rental duration.")
+    return db.create_rental_request(
+        connection, listing_id, requester_id,
+        requested_start.isoformat(), requested_end.isoformat()
+    )
+
+
+def update_rental_request_status(connection, request_id, owner_id, status):
+    if status not in {"accepted", "rejected"}:
+        raise ValueError("Invalid rental request status.")
+    db.update_rental_request_status(connection, request_id, owner_id, status)

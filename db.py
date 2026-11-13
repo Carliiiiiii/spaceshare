@@ -38,6 +38,20 @@ def connect(database_path: Path) -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rental_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id INTEGER NOT NULL,
+            requester_id INTEGER NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            FOREIGN KEY (listing_id) REFERENCES listings (id),
+            FOREIGN KEY (requester_id) REFERENCES users (id)
+        )
+        """
+    )
     listing_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(listings)")
     }
@@ -229,4 +243,58 @@ def delete_listing(
     if cursor.rowcount != 1:
         connection.rollback()
         raise PermissionError("You do not own this listing.")
+    connection.commit()
+
+
+def create_rental_request(connection, listing_id, requester_id, start_date, end_date):
+    cursor = connection.execute(
+        "INSERT INTO rental_requests (listing_id, requester_id, start_date, end_date) VALUES (?, ?, ?, ?)",
+        (listing_id, requester_id, start_date, end_date),
+    )
+    connection.commit()
+    return int(cursor.lastrowid)
+
+
+def get_rental_requests_for_user(connection, user_id):
+    return connection.execute(
+        """SELECT requests.id, requests.listing_id, requests.requester_id,
+                  requests.start_date, requests.end_date, requests.status,
+                  listings.title, listings.owner_id
+           FROM rental_requests AS requests
+           JOIN listings ON listings.id = requests.listing_id
+           WHERE requests.requester_id = ? OR listings.owner_id = ?
+           ORDER BY requests.id DESC""",
+        (user_id, user_id),
+    ).fetchall()
+
+
+def update_rental_request_status(connection, request_id, owner_id, status):
+    if status == "accepted":
+        conflicting_request = connection.execute(
+            """SELECT 1
+               FROM rental_requests AS candidate
+               JOIN rental_requests AS accepted
+                 ON accepted.listing_id = candidate.listing_id
+                AND accepted.status = 'accepted'
+                AND candidate.id <> accepted.id
+                AND candidate.start_date < accepted.end_date
+                AND candidate.end_date > accepted.start_date
+               JOIN listings ON listings.id = candidate.listing_id
+               WHERE candidate.id = ? AND listings.owner_id = ?""",
+            (request_id, owner_id),
+        ).fetchone()
+        if conflicting_request is not None:
+            raise ValueError(
+                "This rental period overlaps an accepted request. "
+                "The request remains pending."
+            )
+    cursor = connection.execute(
+        """UPDATE rental_requests SET status = ?
+           WHERE id = ? AND listing_id IN
+           (SELECT id FROM listings WHERE owner_id = ?) AND status = 'pending'""",
+        (status, request_id, owner_id),
+    )
+    if cursor.rowcount != 1:
+        connection.rollback()
+        raise PermissionError("You cannot change this rental request.")
     connection.commit()

@@ -7,11 +7,13 @@ import streamlit as st
 
 import db
 from logic import (
+    create_rental_request,
     create_listing,
     delete_listing,
     register_user,
     update_listing,
     verify_user_password,
+    update_rental_request_status,
 )
 
 
@@ -184,6 +186,41 @@ def show_listings(connection):
                 f"**Available until:** {listing['available_until'] or 'Unlimited'}  |  "
                 f"**Minimum rental duration:** {listing['minimum_rental_days']} days"
             )
+            if st.session_state.get("user_email"):
+                with st.form(f"request_listing_{listing['id']}"):
+                    request_start = st.date_input("Rental start date", key=f"request_start_{listing['id']}")
+                    request_end = st.date_input("Rental end date", key=f"request_end_{listing['id']}")
+                    request_submitted = st.form_submit_button("Send rental request")
+                if request_submitted:
+                    user = db.get_user_by_email(connection, st.session_state["user_email"])
+                    try:
+                        create_rental_request(connection, listing["id"], user["id"], request_start.isoformat(), request_end.isoformat())
+                    except (ValueError, PermissionError) as error:
+                        st.error(str(error))
+                    else:
+                        st.success("Rental request sent.")
+
+
+def show_rental_requests(connection, user_id):
+    st.subheader("Rental requests")
+    requests = db.get_rental_requests_for_user(connection, user_id)
+    if not requests:
+        st.info("No rental requests yet.")
+        return
+    for request in requests:
+        role = "Incoming" if request["owner_id"] == user_id else "Sent"
+        st.write(f"**{role}:** {request['title']} — {request['start_date']} to {request['end_date']} — **{request['status']}**")
+        if request["owner_id"] == user_id and request["status"] == "pending":
+            columns = st.columns(2)
+            for column, status in zip(columns, ("accepted", "rejected")):
+                with column:
+                    if st.button(status.title(), key=f"request_{request['id']}_{status}"):
+                        try:
+                            update_rental_request_status(connection, request["id"], user_id, status)
+                        except (ValueError, PermissionError) as error:
+                            st.error(str(error))
+                        else:
+                            st.rerun()
 
 
 def show_my_listings(connection, owner_id):
@@ -304,6 +341,7 @@ def main():
             user = db.get_user_by_email(connection, user_email)
             if user is not None:
                 show_my_listings(connection, user["id"])
+                show_rental_requests(connection, user["id"])
             show_listings(connection)
             if st.button("Log out"):
                 del st.session_state["user_email"]

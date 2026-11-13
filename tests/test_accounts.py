@@ -6,11 +6,13 @@ from PIL import Image
 
 import db
 from logic import (
+    create_rental_request,
     create_listing,
     delete_listing,
     register_user,
     update_listing,
     verify_user_password,
+    update_rental_request_status,
 )
 
 
@@ -466,3 +468,74 @@ def test_listing_rejects_invalid_or_oversized_photo(connection, photo_data):
             photo_data,
             "image/png",
         )
+
+
+def make_listing(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+    requester_id = register_user(connection, "requester@example.com", "secret")
+    listing_id = create_listing(
+        connection, owner_id, "Garage", "Lisbon", "Secure garage", 10, 50,
+        "2026-12-01", 30, "2027-01-31"
+    )
+    return owner_id, requester_id, listing_id
+
+
+def test_rental_request_validates_period_and_is_visible_to_both_users(connection):
+    owner_id, requester_id, listing_id = make_listing(connection)
+    request_id = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+    requests_for_owner = db.get_rental_requests_for_user(connection, owner_id)
+    requests_for_requester = db.get_rental_requests_for_user(connection, requester_id)
+    assert requests_for_owner[0]["id"] == request_id
+    assert requests_for_requester[0]["status"] == "pending"
+
+
+@pytest.mark.parametrize(
+    ("start_date", "end_date"),
+    [("2026-11-30", "2026-12-31"), ("2026-12-01", "2027-02-01"), ("2026-12-01", "2026-12-15")],
+)
+def test_rental_request_rejects_out_of_range_or_short_period(connection, start_date, end_date):
+    _, requester_id, listing_id = make_listing(connection)
+    with pytest.raises(ValueError):
+        create_rental_request(connection, listing_id, requester_id, start_date, end_date)
+
+
+def test_only_listing_owner_can_change_request_status(connection):
+    owner_id, requester_id, listing_id = make_listing(connection)
+    request_id = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+    with pytest.raises(PermissionError):
+        update_rental_request_status(connection, request_id, requester_id, "accepted")
+    update_rental_request_status(connection, request_id, owner_id, "accepted")
+    assert db.get_rental_requests_for_user(connection, requester_id)[0]["status"] == "accepted"
+
+
+def test_overlapping_request_cannot_be_accepted_and_remains_pending(connection):
+    owner_id, requester_id, listing_id = make_listing(connection)
+    first_request = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+    second_request = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-15", "2027-01-14"
+    )
+    update_rental_request_status(connection, first_request, owner_id, "accepted")
+    with pytest.raises(ValueError, match="overlaps an accepted request"):
+        update_rental_request_status(connection, second_request, owner_id, "accepted")
+    statuses = {row["id"]: row["status"] for row in db.get_rental_requests_for_user(connection, owner_id)}
+    assert statuses[second_request] == "pending"
+
+
+def test_directly_following_request_can_be_accepted(connection):
+    owner_id, requester_id, listing_id = make_listing(connection)
+    first_request = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+    following_request = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-31", "2027-01-30"
+    )
+    update_rental_request_status(connection, first_request, owner_id, "accepted")
+    update_rental_request_status(connection, following_request, owner_id, "accepted")
+    statuses = {row["id"]: row["status"] for row in db.get_rental_requests_for_user(connection, owner_id)}
+    assert statuses[following_request] == "accepted"
