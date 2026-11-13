@@ -141,6 +141,152 @@ def test_listing_without_end_date_is_unlimited(connection):
     assert db.get_listings(connection)[0]["available_until"] is None
 
 
+def test_listing_filters_apply_all_criteria(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+    matching_listing_id = create_listing(
+        connection,
+        owner_id,
+        "Matches all filters",
+        "Lisbon",
+        "A matching listing.",
+        10,
+        50,
+        "2026-12-01",
+        30,
+        "2026-12-31",
+    )
+    create_listing(
+        connection,
+        owner_id,
+        "Different city",
+        "Porto",
+        "A listing in another city.",
+        20,
+        40,
+        "2026-12-01",
+        30,
+        "2026-12-31",
+    )
+    create_listing(
+        connection,
+        owner_id,
+        "Too small",
+        "Lisbon",
+        "A smaller listing.",
+        9,
+        40,
+        "2026-12-01",
+        30,
+        "2026-12-31",
+    )
+    create_listing(
+        connection,
+        owner_id,
+        "Too expensive",
+        "Lisbon",
+        "A more expensive listing.",
+        10,
+        51,
+        "2026-12-01",
+        30,
+        "2026-12-31",
+    )
+    create_listing(
+        connection,
+        owner_id,
+        "Not available yet",
+        "Lisbon",
+        "A future listing.",
+        10,
+        40,
+        "2027-01-01",
+        30,
+    )
+
+    listings = db.get_listings(
+        connection,
+        city="  lisb  ",
+        minimum_size_sqm=10,
+        maximum_price_per_month_eur=50,
+        available_on="2026-12-15",
+    )
+
+    assert [listing["id"] for listing in listings] == [matching_listing_id]
+    assert "owner_id" not in listings[0].keys()
+
+
+def test_listing_availability_filter_includes_bounds_and_unlimited_listings(
+    connection,
+):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+    available_from_id = create_listing(
+        connection,
+        owner_id,
+        "Available from boundary",
+        "Lisbon",
+        "Available on its first day.",
+        10,
+        50,
+        "2026-12-15",
+        30,
+        "2027-01-31",
+    )
+    available_until_id = create_listing(
+        connection,
+        owner_id,
+        "Available until boundary",
+        "Lisbon",
+        "Available on its last day.",
+        10,
+        50,
+        "2026-11-01",
+        30,
+        "2026-12-15",
+    )
+    unlimited_id = create_listing(
+        connection,
+        owner_id,
+        "Unlimited listing",
+        "Lisbon",
+        "No end date.",
+        10,
+        50,
+        "2026-11-01",
+        30,
+    )
+    create_listing(
+        connection,
+        owner_id,
+        "Already unavailable",
+        "Lisbon",
+        "Ended before the selected day.",
+        10,
+        50,
+        "2026-11-01",
+        30,
+        "2026-12-14",
+    )
+    create_listing(
+        connection,
+        owner_id,
+        "Not yet available",
+        "Lisbon",
+        "Starts after the selected day.",
+        10,
+        50,
+        "2026-12-16",
+        30,
+    )
+
+    listings = db.get_listings(connection, available_on="2026-12-15")
+
+    assert {listing["id"] for listing in listings} == {
+        available_from_id,
+        available_until_id,
+        unlimited_id,
+    }
+
+
 def test_listing_end_date_must_fit_period(connection):
     owner_id = register_user(connection, "owner@example.com", "secret")
 
