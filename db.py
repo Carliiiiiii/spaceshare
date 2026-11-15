@@ -136,8 +136,15 @@ def get_listings(
     minimum_size_sqm: Optional[float] = None,
     maximum_price_per_month_eur: Optional[float] = None,
     available_on: Optional[str] = None,
+    requested_start: Optional[str] = None,
+    requested_end: Optional[str] = None,
 ) -> list:
     """Return public listing fields, optionally limited by browse filters."""
+    if (requested_start is None) != (requested_end is None):
+        raise ValueError("Select both rental dates to filter by availability.")
+    if requested_start is not None and requested_end <= requested_start:
+        raise ValueError("Rental end must be after rental start.")
+
     filters = []
     parameters = []
 
@@ -156,6 +163,21 @@ def get_listings(
             "AND (available_until IS NULL OR available_until >= ?)"
         )
         parameters.extend((available_on, available_on))
+    if requested_start is not None and requested_end is not None:
+        filters.append(
+            "available_from <= ? "
+            "AND (available_until IS NULL OR available_until >= ?) "
+            "AND NOT EXISTS ("
+            "SELECT 1 FROM rental_requests AS accepted_request "
+            "WHERE accepted_request.listing_id = listings.id "
+            "AND accepted_request.status = 'accepted' "
+            "AND accepted_request.start_date < ? "
+            "AND accepted_request.end_date > ?"
+            ")"
+        )
+        parameters.extend(
+            (requested_start, requested_end, requested_end, requested_start)
+        )
 
     query = """
         SELECT id, title, city, description, size_sqm,
@@ -253,6 +275,23 @@ def create_rental_request(connection, listing_id, requester_id, start_date, end_
     )
     connection.commit()
     return int(cursor.lastrowid)
+
+
+def has_accepted_rental_request_overlap(
+    connection: sqlite3.Connection,
+    listing_id: int,
+    start_date: str,
+    end_date: str,
+) -> bool:
+    """Return whether an accepted request overlaps the half-open period."""
+    return connection.execute(
+        """SELECT 1
+           FROM rental_requests
+           WHERE listing_id = ? AND status = 'accepted'
+             AND start_date < ? AND end_date > ?
+           LIMIT 1""",
+        (listing_id, end_date, start_date),
+    ).fetchone() is not None
 
 
 def get_rental_requests_for_user(connection, user_id):

@@ -111,7 +111,7 @@ def show_listing_form(connection, user_email):
 
 def show_listings(connection):
     st.subheader("Available storage listings")
-    filter_columns = st.columns(4)
+    filter_columns = st.columns(5)
     with filter_columns[0]:
         city = st.text_input(
             "City",
@@ -137,27 +137,43 @@ def show_listings(connection):
             key="listing_filter_maximum_price",
         )
     with filter_columns[3]:
-        available_on = st.date_input(
-            "Available on",
+        requested_start = st.date_input(
+            "Desired rental start",
             value=None,
-            help="Show spaces available on the selected date.",
-            key="listing_filter_available_on",
+            key="listing_filter_requested_start",
         )
+    with filter_columns[4]:
+        requested_end = st.date_input(
+            "Desired rental end",
+            value=None,
+            key="listing_filter_requested_end",
+        )
+
+    if (requested_start is None) != (requested_end is None):
+        st.error("Select both rental dates to filter by availability.")
+        return
+    if requested_start is not None and requested_end <= requested_start:
+        st.error("Rental end must be after rental start.")
+        return
 
     listings = db.get_listings(
         connection,
         city=city,
         minimum_size_sqm=minimum_size_sqm,
         maximum_price_per_month_eur=maximum_price_per_month_eur,
-        available_on=available_on.isoformat() if available_on else None,
+        requested_start=(
+            requested_start.isoformat() if requested_start else None
+        ),
+        requested_end=requested_end.isoformat() if requested_end else None,
     )
+
     if not listings:
         has_filters = any(
             (
                 city.strip(),
                 minimum_size_sqm is not None,
                 maximum_price_per_month_eur is not None,
-                available_on is not None,
+                requested_start is not None,
             )
         )
         st.info(
@@ -168,6 +184,7 @@ def show_listings(connection):
         return
 
     st.caption(f"{len(listings)} listing{'s' if len(listings) != 1 else ''} found")
+
     for listing in listings:
         with st.container(border=True):
             st.markdown(f"### {listing['title']}")
@@ -184,17 +201,37 @@ def show_listings(connection):
             st.write(
                 f"**Available from:** {listing['available_from']}  |  "
                 f"**Available until:** {listing['available_until'] or 'Unlimited'}  |  "
-                f"**Minimum rental duration:** {listing['minimum_rental_days']} days"
+                f"**Minimum rental duration:** "
+                f"{listing['minimum_rental_days']} days"
             )
+
             if st.session_state.get("user_email"):
                 with st.form(f"request_listing_{listing['id']}"):
-                    request_start = st.date_input("Rental start date", key=f"request_start_{listing['id']}")
-                    request_end = st.date_input("Rental end date", key=f"request_end_{listing['id']}")
-                    request_submitted = st.form_submit_button("Send rental request")
+                    request_start = st.date_input(
+                        "Rental start date",
+                        key=f"request_start_{listing['id']}",
+                    )
+                    request_end = st.date_input(
+                        "Rental end date",
+                        key=f"request_end_{listing['id']}",
+                    )
+                    request_submitted = st.form_submit_button(
+                        "Send rental request"
+                    )
+
                 if request_submitted:
-                    user = db.get_user_by_email(connection, st.session_state["user_email"])
+                    user = db.get_user_by_email(
+                        connection,
+                        st.session_state["user_email"],
+                    )
                     try:
-                        create_rental_request(connection, listing["id"], user["id"], request_start.isoformat(), request_end.isoformat())
+                        create_rental_request(
+                            connection,
+                            listing["id"],
+                            user["id"],
+                            request_start.isoformat(),
+                            request_end.isoformat(),
+                        )
                     except (ValueError, PermissionError) as error:
                         st.error(str(error))
                     else:
