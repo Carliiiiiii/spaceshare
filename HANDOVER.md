@@ -2,31 +2,38 @@
 
 ## Current status
 
-The current project is on the `main` branch and is published in the public
-GitHub repository:
+The current project is on the `main` branch in the public GitHub repository:
 
 https://github.com/Carliiiiiii/spaceshare
 
 The app currently supports:
 
-- account registration, login, and logout;
-- secure Argon2 password hashes;
-- SQLite account persistence;
-- creating storage listings after login;
-- listing fields for title, city, description, size, monthly price,
-  availability, and minimum rental duration;
-- an optional `Available until` date with date-range validation;
-- a `My listings` area for editing and confirmed deletion;
-- owner checks in both the business logic and database update/delete queries;
-- optional JPG or PNG photos up to 5 MB;
-- validation that uploaded files are real JPG or PNG images;
-- photo replacement and removal for the listing owner;
-- public listing display with a placeholder when no photo exists;
-- public browsing before login, with optional filters for city, minimum size,
-  maximum monthly price, and availability on a selected date.
+- account registration, login, and logout with secure Argon2 password hashes;
+- SQLite persistence for accounts, listings, photos, and rental requests;
+- creating storage listings after login, with title, city, description, size,
+  monthly price, availability, minimum rental duration, and an optional end
+  date;
+- optional JPG or PNG photos up to 5 MB, including validation, replacement,
+  removal, and a public placeholder when there is no photo;
+- editing and confirmed deletion of a user's own listings, protected by owner
+  checks in both the business logic and database queries;
+- public browsing before login, with filters for city, minimum size, maximum
+  monthly price, and a desired rental start/end date range;
+- rental requests with `pending`, `accepted`, and `rejected` statuses;
+- a **My requests** area that separates sent requests from requests for a
+  user's listings; only the listing owner can accept or reject a pending
+  request;
+- availability filtering and acceptance checks that prevent overlapping
+  accepted rentals. Pending overlaps remain possible, and a rental may start
+  on the date a previous accepted rental ends.
 
-There is no booking, payment, chat, contact-email workflow, listing detail
-page, or photo storage service yet.
+Rental periods use half-open intervals: `[start date, end date)`. An accepted
+request blocks an overlapping range, while a request ending on a given date
+does not block a following request starting on that same date.
+
+There is no payment, chat, contact-email workflow, listing detail page, or
+final booking/contract workflow yet. A rental request alone is not a payment
+or confirmed booking.
 
 ## Local setup and start
 
@@ -46,45 +53,56 @@ http://localhost:8501
 The local SQLite database is created as `spaceshare.sqlite3` in the project
 working directory. It is intentionally ignored by Git.
 
+Anonymous users see **Find storage**, **Register**, and **Log in**. Logged-in
+users see **Find storage**, **List a space**, and **My requests**.
+
 ## Run the tests
 
 ```bash
 uv run pytest -q
 ```
 
-The tests use temporary SQLite databases and currently cover registration,
-password verification, persistence, listing validation, date validation,
-ownership permissions, listing updates/deletions, photo validation and
-persistence, and public listing filters.
+The tests use temporary SQLite databases. They cover accounts, password
+verification, persistence, listing validation, ownership, photos, public
+filters, rental-request validation, request visibility and status permissions,
+and accepted-rental overlap and date-range availability rules.
 
 ## Manual browser checks
 
-1. Without logging in, browse the listing overview and try the city, minimum
-   size, maximum price, and availability-date filters.
-2. Register an account and log in.
+1. Without logging in, browse listings and try the city, minimum-size,
+   maximum-price, and desired rental date-range filters.
+2. Register an account, log in, and confirm the three logged-in navigation
+   tabs are visible.
 3. Create a listing without a photo and check that the placeholder is shown.
 4. Create another listing with a JPG or PNG photo smaller than 5 MB.
-5. Open `My listings`, replace the photo, save, and verify the new image.
-6. Remove the photo and verify the placeholder returns.
-7. Create a second account and verify it cannot see or manage the first
-   account's listings in `My listings`.
-8. Restart Streamlit and confirm that accounts, listings, and photos persist.
+5. In **List a space**, replace the photo, save, remove it, and verify the
+   placeholder returns.
+6. Create a second account and verify it cannot edit or delete the first
+   account's listings.
+7. With the second account, send a valid rental request from a listing card.
+   Verify it appears as sent for the requester and incoming for the owner.
+8. As the owner, accept the request. Search an overlapping desired date range
+   and verify the listing is hidden; then try to accept an overlapping pending
+   request and verify it remains pending.
+9. Verify a request beginning on the accepted request's end date can be
+   accepted.
+10. Restart Streamlit and confirm that accounts, listings, photos, and rental
+    requests persist.
 
 ## Open points
 
-- The app currently stores photo bytes in SQLite. This is suitable for the
-  small local project, but production deployment must use persistent storage;
-  otherwise a hosting restart or redeploy could lose the database and photos.
-- Before public production use, choose a durable database and decide whether
-  photos should move to an object-storage service, with only a reference kept
-  in the database.
-- Add deployment configuration and verify HTTPS, backups, and data retention.
-- Consider adding a listing detail page, contact by email, and later booking
-  features as separate small steps.
+- Add requester cancellation, owner/requester notifications, and a clear
+  booking or contract flow before treating rental requests as reservations.
+- Add a listing detail page and a privacy-conscious contact workflow.
+- The app currently stores photo bytes in SQLite. This is appropriate for the
+  small local project, but a public deployment needs durable database and
+  object-storage services.
+- Before public production use, define backups, HTTPS, data retention, and
+  privacy requirements.
 
 ## Repository and data safety
 
 The repository is public, so do not commit user data or credentials. The
 `.gitignore` excludes `*.sqlite3`, `.env`, virtual environments, caches, and
-Python bytecode. Before every push, check the GitHub Desktop file list and
-confirm that no database, secret, token, or credential file is included.
+Python bytecode. Before every push, inspect the staged file list and confirm
+that no database, secret, token, or credential file is included.
