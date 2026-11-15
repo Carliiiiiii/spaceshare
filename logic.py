@@ -210,7 +210,8 @@ def delete_listing(
 
 def create_rental_request(connection, listing_id, requester_id, start_date, end_date):
     listing = connection.execute(
-        "SELECT owner_id, available_from, available_until, minimum_rental_days FROM listings WHERE id = ?",
+        "SELECT owner_id, available_from, available_until, minimum_rental_days "
+        "FROM listings WHERE id = ?",
         (listing_id,),
     ).fetchone()
     if listing is None:
@@ -231,10 +232,15 @@ def create_rental_request(connection, listing_id, requester_id, start_date, end_
         if requested_end > date.fromisoformat(listing["available_until"]):
             raise ValueError("End date is after the listing's availability.")
     if (requested_end - requested_start).days < listing["minimum_rental_days"]:
-        raise ValueError("The requested period is shorter than the minimum rental duration.")
+        raise ValueError(
+            "The requested period is shorter than the minimum rental duration."
+        )
     return db.create_rental_request(
-        connection, listing_id, requester_id,
-        requested_start.isoformat(), requested_end.isoformat()
+        connection,
+        listing_id,
+        requester_id,
+        requested_start.isoformat(),
+        requested_end.isoformat(),
     )
 
 
