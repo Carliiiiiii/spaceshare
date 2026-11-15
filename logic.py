@@ -235,14 +235,6 @@ def create_rental_request(connection, listing_id, requester_id, start_date, end_
         raise ValueError(
             "The requested period is shorter than the minimum rental duration."
         )
-    if db.has_accepted_rental_request_overlap(
-        connection,
-        listing_id,
-        requested_start.isoformat(),
-        requested_end.isoformat(),
-    ):
-        raise ValueError("This rental period overlaps an accepted request.")
-
     return db.create_rental_request(
         connection,
         listing_id,

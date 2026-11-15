@@ -95,17 +95,19 @@ def test_overlapping_request_cannot_be_accepted_and_remains_pending(connection):
     assert statuses[second_request] == "pending"
 
 
-def test_rental_request_rejects_overlap_with_already_accepted_period(connection):
+def test_overlapping_request_is_created_pending_when_period_is_already_accepted(connection):
     owner_id, requester_id, listing_id = make_listing(connection)
     accepted_id = create_rental_request(
         connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
     )
     update_rental_request_status(connection, accepted_id, owner_id, "accepted")
 
-    with pytest.raises(ValueError, match="overlaps an accepted request"):
-        create_rental_request(
-            connection, listing_id, requester_id, "2026-12-15", "2027-01-14"
-        )
+    overlapping_id = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-15", "2027-01-14"
+    )
+    request = db.get_rental_requests_for_user(connection, owner_id)[0]
+    assert request["id"] == overlapping_id
+    assert request["status"] == "pending"
 
 
 def test_directly_following_request_can_be_accepted(connection):
