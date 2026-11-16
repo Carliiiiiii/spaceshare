@@ -9,6 +9,7 @@ import streamlit as st
 from streamlit_folium import st_folium
 
 import db
+from supabase_backend import create_supabase_client
 from logic import (
     PUBLIC_LOCATION_DECIMAL_PLACES,
     create_rental_request,
@@ -33,6 +34,12 @@ DEFAULT_MAP_CENTER = (38.7223, -9.1393)
 
 def get_connection():
     """Open a database connection for the current Streamlit run."""
+    try:
+        if "SUPABASE_URL" in st.secrets and "SUPABASE_SERVICE_ROLE_KEY" in st.secrets:
+            return create_supabase_client(st.secrets)
+    except Exception as error:
+        st.error(f"Online database configuration error: {error}")
+        st.stop()
     return db.connect(DATABASE_PATH)
 
 
@@ -402,7 +409,9 @@ def show_listing_card(connection, listing):
     with st.container(border=True):
         media_column, details_column = st.columns((1, 2), gap="large")
         with media_column:
-            if listing["photo_data"]:
+            if listing.get("photo_url"):
+                st.image(listing["photo_url"])
+            elif listing.get("photo_data"):
                 st.image(listing["photo_data"])
             else:
                 st.info("No photo available.")
@@ -651,7 +660,9 @@ def show_my_listings(connection, owner_id):
                         else None
                     ),
                 )
-                if listing["photo_data"]:
+                if listing.get("photo_url"):
+                    st.image(listing["photo_url"], caption="Current photo")
+                elif listing.get("photo_data"):
                     st.image(listing["photo_data"], caption="Current photo")
                 uploaded_photo = st.file_uploader(
                     "Replace photo (optional)",
@@ -706,6 +717,7 @@ def show_my_listings(connection, owner_id):
                     st.error(str(error))
                 else:
                     st.success("Listing updated.")
+                    st.rerun()
 
             with st.form(f"delete_listing_{listing['id']}"):
                 confirmed = st.checkbox("I understand that this cannot be undone.")

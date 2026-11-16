@@ -265,11 +265,7 @@ def delete_listing(
 
 
 def create_rental_request(connection, listing_id, requester_id, start_date, end_date):
-    listing = connection.execute(
-        "SELECT owner_id, available_from, available_until, minimum_rental_days "
-        "FROM listings WHERE id = ?",
-        (listing_id,),
-    ).fetchone()
+    listing = db.get_listing_for_request(connection, listing_id)
     if listing is None:
         raise ValueError("Listing not found.")
     if listing["owner_id"] == requester_id:
