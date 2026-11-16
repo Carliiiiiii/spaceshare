@@ -660,7 +660,9 @@ def show_my_listings(connection, owner_id):
                         else None
                     ),
                 )
-                if listing["photo_data"]:
+                if listing.get("photo_url"):
+                    st.image(listing["photo_url"], caption="Current photo")
+                elif listing.get("photo_data"):
                     st.image(listing["photo_data"], caption="Current photo")
                 uploaded_photo = st.file_uploader(
                     "Replace photo (optional)",

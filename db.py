@@ -1,6 +1,7 @@
 """SQLite storage for SpaceShare accounts."""
 
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -181,7 +182,7 @@ def create_listing(
             raise ValueError("The listing could not be created.")
         listing_id = int(response.data[0]["id"])
         if photo_data:
-            path = f"listings/{listing_id}"
+            path = f"listings/{listing_id}/{uuid.uuid4().hex}"
             connection.client.storage.from_(connection.settings.storage_bucket).upload(
                 path, photo_data, {"content-type": photo_mime_type, "upsert": "true"}
             )
@@ -459,6 +460,8 @@ def update_listing(
                 "photo_path": path,
                 "photo_url": connection.client.storage.from_(connection.settings.storage_bucket).get_public_url(path),
             }).eq("id", listing_id).eq("owner_id", owner_id).execute()
+            if old[0].get("photo_path") and old[0]["photo_path"] != path:
+                connection.client.storage.from_(connection.settings.storage_bucket).remove([old[0]["photo_path"]])
         return
     assignments = [
         "title = ?",
