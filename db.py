@@ -235,7 +235,7 @@ def get_listings(
                 connection.client.table("listings")
                 .select(
                     "id,title,city,description,size_sqm,price_per_month_eur,"
-                    "available_from,available_until,photo_data,photo_mime_type,"
+                    "available_from,available_until,photo_mime_type,"
                     "photo_path,photo_url,public_latitude,public_longitude,"
                     "minimum_rental_days"
                 )
@@ -364,7 +364,7 @@ def get_listings_by_owner(connection: sqlite3.Connection, owner_id: int) -> list
             connection.client.table("listings")
             .select(
                 "id,title,city,description,size_sqm,price_per_month_eur,"
-                "available_from,available_until,photo_data,photo_mime_type,"
+                "available_from,available_until,photo_mime_type,"
                 "photo_path,photo_url,public_latitude,public_longitude,"
                 "minimum_rental_days"
             )
