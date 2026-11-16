@@ -1,7 +1,7 @@
 """Validation and authentication rules for SpaceShare accounts."""
 
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timezone
 from io import BytesIO
 from typing import Optional
 
@@ -14,6 +14,7 @@ import db
 
 password_hasher = PasswordHasher()
 MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024
+MAX_MESSAGE_LENGTH = 1000
 
 
 def normalize_email(email: str) -> str:
@@ -248,3 +249,21 @@ def update_rental_request_status(connection, request_id, owner_id, status):
     if status not in {"accepted", "rejected"}:
         raise ValueError("Invalid rental request status.")
     db.update_rental_request_status(connection, request_id, owner_id, status)
+
+
+def send_message(connection, request_id, sender_id, message):
+    """Validate and send a message as a participant in a request."""
+    if not isinstance(message, str) or not message.strip():
+        raise ValueError("Message cannot be empty.")
+    cleaned_message = message.strip()
+    if len(cleaned_message) > MAX_MESSAGE_LENGTH:
+        raise ValueError("Message must be 1000 characters or fewer.")
+    sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return db.create_message(
+        connection, request_id, sender_id, cleaned_message, sent_at
+    )
+
+
+def get_messages(connection, request_id, user_id):
+    """Return messages only for a renter or the listing owner."""
+    return db.get_messages(connection, request_id, user_id)

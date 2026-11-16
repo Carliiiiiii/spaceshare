@@ -4,7 +4,9 @@ import db
 from logic import (
     create_listing,
     create_rental_request,
+    get_messages,
     register_user,
+    send_message,
     update_rental_request_status,
 )
 
@@ -241,3 +243,68 @@ def test_accepted_rental_request_overlap_uses_half_open_periods(connection):
     assert not db.has_accepted_rental_request_overlap(
         connection, listing_id, "2026-11-01", "2026-12-01"
     )
+
+
+def test_request_participants_can_exchange_messages_in_order(connection):
+    owner_id, requester_id, listing_id = make_listing(connection)
+    request_id = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+
+    send_message(connection, request_id, requester_id, "Is the space accessible on weekends?")
+    send_message(connection, request_id, owner_id, "Yes, it is accessible every day.")
+
+    messages = get_messages(connection, request_id, requester_id)
+    assert [message["message"] for message in messages] == [
+        "Is the space accessible on weekends?",
+        "Yes, it is accessible every day.",
+    ]
+    assert messages[0]["sender_id"] == requester_id
+    assert messages[1]["sender_id"] == owner_id
+
+
+def test_third_account_cannot_read_or_send_request_messages(connection):
+    owner_id, requester_id, listing_id = make_listing(connection)
+    third_user_id = register_user(connection, "third@example.com", "secret")
+    request_id = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+
+    with pytest.raises(PermissionError):
+        send_message(connection, request_id, third_user_id, "Private message")
+    with pytest.raises(PermissionError):
+        get_messages(connection, request_id, third_user_id)
+
+
+@pytest.mark.parametrize("message", ["", "   ", "x" * 1001])
+def test_messages_reject_empty_or_too_long_text(connection, message):
+    _, requester_id, listing_id = make_listing(connection)
+    request_id = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+
+    with pytest.raises(ValueError):
+        send_message(connection, request_id, requester_id, message)
+
+
+def test_messages_survive_database_reopen(tmp_path):
+    database_path = tmp_path / "messages.sqlite3"
+    first_connection = db.connect(database_path)
+    owner_id = register_user(first_connection, "owner@example.com", "secret")
+    requester_id = register_user(first_connection, "requester@example.com", "secret")
+    listing_id = create_listing(
+        first_connection, owner_id, "Garage", "Lisbon", "Secure garage", 10, 50,
+        "2026-12-01", 30
+    )
+    request_id = create_rental_request(
+        first_connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+    send_message(first_connection, request_id, requester_id, "Saved message")
+    first_connection.close()
+
+    second_connection = db.connect(database_path)
+    try:
+        messages = get_messages(second_connection, request_id, owner_id)
+        assert messages[0]["message"] == "Saved message"
+    finally:
+        second_connection.close()

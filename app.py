@@ -1,7 +1,7 @@
 """Streamlit interface for browsing and managing SpaceShare listings."""
 
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime
 
 import streamlit as st
 
@@ -10,7 +10,9 @@ from logic import (
     create_rental_request,
     create_listing,
     delete_listing,
+    get_messages,
     register_user,
+    send_message,
     update_listing,
     verify_user_password,
     update_rental_request_status,
@@ -256,6 +258,7 @@ def show_rental_requests(connection, user_id):
             f"**{request['title']}** — {request['start_date']} to "
             f"{request['end_date']} — **Status: {request['status']}**"
         )
+        show_request_chat(connection, user_id, request)
 
     st.markdown("#### Requests for my listings")
     if not incoming_requests:
@@ -265,6 +268,7 @@ def show_rental_requests(connection, user_id):
             f"**{request['title']}** — {request['start_date']} to "
             f"{request['end_date']} — **Status: {request['status']}**"
         )
+        show_request_chat(connection, user_id, request)
         if request["owner_id"] == user_id and request["status"] == "pending":
             columns = st.columns(2)
             for column, status, label in zip(
@@ -280,6 +284,46 @@ def show_rental_requests(connection, user_id):
                             st.error(str(error))
                         else:
                             st.rerun()
+
+
+def show_request_chat(connection, user_id, request):
+    with st.expander("Open chat"):
+        messages = get_messages(connection, request["id"], user_id)
+        if messages:
+            for message in messages:
+                sender_role = (
+                    "Renter" if message["sender_id"] == message["requester_id"]
+                    else "Listing owner"
+                )
+                try:
+                    sent_at = datetime.fromisoformat(message["sent_at"])
+                    formatted_time = sent_at.strftime("%d %b %Y, %H:%M UTC")
+                except ValueError:
+                    formatted_time = message["sent_at"]
+                with st.container(border=True):
+                    st.markdown(f"**{sender_role}**")
+                    st.caption(formatted_time)
+                    st.write(message["message"])
+        else:
+            st.info("No messages yet.")
+
+        with st.form(f"message_form_{request['id']}"):
+            message_text = st.text_area(
+                "Message",
+                max_chars=1000,
+                key=f"message_text_{request['id']}",
+            )
+            send_submitted = st.form_submit_button("Send message")
+        if send_submitted:
+            try:
+                send_message(connection, request["id"], user_id, message_text)
+            except (ValueError, PermissionError) as error:
+                st.error(str(error))
+            else:
+                st.success("Message sent.")
+
+        if st.button("Refresh messages", key=f"refresh_messages_{request['id']}"):
+            st.rerun()
 
 
 def show_my_listings(connection, owner_id):

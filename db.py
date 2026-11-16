@@ -52,6 +52,19 @@ def connect(database_path: Path) -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rental_request_id INTEGER NOT NULL,
+            sender_id INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            sent_at TEXT NOT NULL,
+            FOREIGN KEY (rental_request_id) REFERENCES rental_requests (id),
+            FOREIGN KEY (sender_id) REFERENCES users (id)
+        )
+        """
+    )
     listing_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(listings)")
     }
@@ -337,3 +350,40 @@ def update_rental_request_status(connection, request_id, owner_id, status):
         connection.rollback()
         raise PermissionError("You cannot change this rental request.")
     connection.commit()
+
+
+def _user_is_request_participant(connection, request_id, user_id) -> bool:
+    return connection.execute(
+        """SELECT 1 FROM rental_requests
+           JOIN listings ON listings.id = rental_requests.listing_id
+           WHERE rental_requests.id = ?
+             AND (rental_requests.requester_id = ? OR listings.owner_id = ?)""",
+        (request_id, user_id, user_id),
+    ).fetchone() is not None
+
+
+def create_message(connection, request_id, sender_id, message, sent_at):
+    if not _user_is_request_participant(connection, request_id, sender_id):
+        raise PermissionError("Only the renter and listing owner can send messages.")
+    cursor = connection.execute(
+        "INSERT INTO messages (rental_request_id, sender_id, message, sent_at) VALUES (?, ?, ?, ?)",
+        (request_id, sender_id, message, sent_at),
+    )
+    connection.commit()
+    return int(cursor.lastrowid)
+
+
+def get_messages(connection, request_id, user_id):
+    if not _user_is_request_participant(connection, request_id, user_id):
+        raise PermissionError("Only the renter and listing owner can read messages.")
+    return connection.execute(
+        """SELECT messages.id, messages.message, messages.sent_at,
+                  messages.sender_id, rental_requests.requester_id,
+                  listings.owner_id
+           FROM messages
+           JOIN rental_requests ON rental_requests.id = messages.rental_request_id
+           JOIN listings ON listings.id = rental_requests.listing_id
+           WHERE messages.rental_request_id = ?
+           ORDER BY messages.sent_at ASC, messages.id ASC""",
+        (request_id,),
+    ).fetchall()
