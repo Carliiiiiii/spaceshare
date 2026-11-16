@@ -717,6 +717,7 @@ def show_my_listings(connection, owner_id):
                     st.error(str(error))
                 else:
                     st.success("Listing updated.")
+                    st.rerun()
 
             with st.form(f"delete_listing_{listing['id']}"):
                 confirmed = st.checkbox("I understand that this cannot be undone.")
