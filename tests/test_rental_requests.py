@@ -5,6 +5,8 @@ from logic import (
     create_listing,
     create_rental_request,
     get_messages,
+    get_unread_message_count,
+    mark_messages_read,
     register_user,
     send_message,
     update_rental_request_status,
@@ -308,3 +310,16 @@ def test_messages_survive_database_reopen(tmp_path):
         assert messages[0]["message"] == "Saved message"
     finally:
         second_connection.close()
+
+
+def test_unread_count_tracks_messages_from_other_participant(connection):
+    owner_id, requester_id, listing_id = make_listing(connection)
+    request_id = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+    send_message(connection, request_id, requester_id, "Please confirm access.")
+    assert get_unread_message_count(connection, owner_id) == 1
+    assert get_unread_message_count(connection, requester_id) == 0
+
+    mark_messages_read(connection, request_id, owner_id)
+    assert get_unread_message_count(connection, owner_id) == 0

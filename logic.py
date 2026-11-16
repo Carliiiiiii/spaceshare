@@ -322,3 +322,11 @@ def send_message(connection, request_id, sender_id, message):
 def get_messages(connection, request_id, user_id):
     """Return messages only for a renter or the listing owner."""
     return db.get_messages(connection, request_id, user_id)
+
+
+def get_unread_message_count(connection, user_id):
+    return db.get_unread_message_count(connection, user_id)
+
+
+def mark_messages_read(connection, request_id, user_id):
+    db.mark_messages_read(connection, request_id, user_id)

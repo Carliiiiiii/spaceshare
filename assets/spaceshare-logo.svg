@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -64 445 289" role="img" aria-labelledby="title">
+  <title id="title">SpaceShare</title>
+  <path d="M159 27 V15 Q159 11 163 9 L217 -19 Q222 -22 227 -19 L281 9 Q285 11 285 15 V27" fill="none" stroke="#58BDEB" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M222 2 L235 8 L235 20 L222 26 L209 20 L209 8 Z M209 8 L222 14 L235 8 M222 14 V26 M216 5 L228 11" fill="none" stroke="#58BDEB" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M157 108 C147 98 130 94 117 96 C102 98 91 103 83 111 C66 128 79 143 103 149 C126 155 156 157 159 178 C163 203 119 215 83 194" transform="translate(-7 0)" fill="none" stroke="#F77B32" stroke-width="17" stroke-linecap="round"/>
+  <path d="M108 40 C88 22 44 22 32 43 C18 66 46 76 69 80 C96 85 106 96 99 111 C91 131 50 134 27 114" fill="none" stroke="#58BDEB" stroke-width="17" stroke-linecap="round"/>
+  <path d="M157 108 C147 98 130 94 117 96 C107 97.33 98.78 100 92.04 104" transform="translate(-7 0)" fill="none" stroke="#F77B32" stroke-width="17"/>
+  <g font-family="Arial Rounded MT Bold, Nunito, Avenir Next, sans-serif" font-size="88" font-weight="800" letter-spacing="-3">
+    <text x="116" y="103" textLength="251" lengthAdjust="spacingAndGlyphs" fill="#58BDEB">pace</text>
+    <text x="163" y="201" textLength="251" lengthAdjust="spacingAndGlyphs" fill="#F77B32">hare</text>
+  </g>
+</svg>

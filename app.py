@@ -15,6 +15,8 @@ from logic import (
     create_listing,
     delete_listing,
     get_messages,
+    get_unread_message_count,
+    mark_messages_read,
     register_user,
     send_message,
     update_listing,
@@ -25,12 +27,36 @@ from logic import (
 
 
 DATABASE_PATH = Path("spaceshare.sqlite3")
+LOGO_PATH = Path(__file__).parent / "assets" / "spaceshare-logo.svg"
 DEFAULT_MAP_CENTER = (38.7223, -9.1393)
 
 
 def get_connection():
     """Open a database connection for the current Streamlit run."""
     return db.connect(DATABASE_PATH)
+
+
+def show_brand_header():
+    """Show the responsive SpaceShare brand header."""
+    st.markdown(
+        """
+        <style>
+        .spaceshare-logo { width: min(100%, 260px); height: auto; margin: 0 0 0.4rem 0; }
+        [data-testid="stAppViewContainer"] { background: #F8FCFE; }
+        [data-testid="stHeader"] { background: #F8FCFE; }
+        [data-testid="stMainBlockContainer"] { max-width: 1800px; padding-left: 2rem; padding-right: 2rem; }
+        h1, h2, h3 { color: #17324D; }
+        [data-testid="stForm"] { border-color: #BFE8F8; border-radius: 0.75rem; }
+        [data-testid="stVerticalBlockBorderWrapper"] { border-color: #BFE8F8; border-radius: 1rem; background: #FFFFFF; }
+        .listing-meta { color: #17324D; font-size: 0.95rem; }
+        .listing-price { color: #D95F1E; font-size: 1.2rem; font-weight: 700; }
+        div.stButton > button[kind="primary"], div.stFormSubmitButton > button { background: #F77B32; color: white; border: 0; }
+        div.stButton > button[kind="primary"]:hover, div.stFormSubmitButton > button:hover { background: #D95F1E; color: white; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.image(str(LOGO_PATH), width=260)
 
 
 def show_registration(connection):
@@ -286,7 +312,7 @@ def show_listing_form(connection, user_email):
             st.success("Listing created.")
 
 
-def show_listings(connection):
+def show_listings(connection, include_map=True):
     st.subheader("Available storage listings")
     filter_columns = st.columns(5)
     with filter_columns[0]:
@@ -328,10 +354,10 @@ def show_listings(connection):
 
     if (requested_start is None) != (requested_end is None):
         st.error("Select both rental dates to filter by availability.")
-        return
+        return []
     if requested_start is not None and requested_end <= requested_start:
         st.error("Rental end must be after rental start.")
-        return
+        return []
 
     listings = db.get_listings(
         connection,
@@ -358,39 +384,48 @@ def show_listings(connection):
             if has_filters
             else "No listings yet."
         )
-        return
+        return []
 
     st.caption(f"{len(listings)} listing{'s' if len(listings) != 1 else ''} found")
 
-    listing_column, map_column = st.columns((3, 2), gap="large")
-    with listing_column:
-        st.markdown("#### Listings")
-        for listing in listings:
-            show_listing_card(connection, listing)
-    with map_column:
+    st.markdown("#### Listings")
+    for listing in listings:
+        show_listing_card(connection, listing)
+    if include_map:
+        st.markdown("#### Map")
         show_listing_map(listings)
+    return listings
 
 
 def show_listing_card(connection, listing):
     """Render one public listing card in the list half of the browse view."""
     with st.container(border=True):
-        st.markdown(f"### {listing['title']}")
-        if listing["photo_data"]:
-            st.image(listing["photo_data"], caption=listing["title"])
-        else:
-            st.info("No photo available.")
-        st.write(f"**City:** {listing['city']}")
-        st.write(listing["description"])
-        st.write(
-            f"**Size:** {listing['size_sqm']} m²  |  "
-            f"**Price:** €{listing['price_per_month_eur']:.2f} per month"
-        )
-        st.write(
-            f"**Available from:** {listing['available_from']}  |  "
-            f"**Available until:** {listing['available_until'] or 'Unlimited'}  |  "
-            f"**Minimum rental duration:** "
-            f"{listing['minimum_rental_days']} days"
-        )
+        media_column, details_column = st.columns((1, 2), gap="large")
+        with media_column:
+            if listing["photo_data"]:
+                st.image(listing["photo_data"])
+            else:
+                st.info("No photo available.")
+        with details_column:
+            st.markdown(f"### {listing['title']}")
+            st.markdown(
+                "<hr style='margin: -0.35rem 0 0.75rem 0; border: 0; "
+                "border-top: 2px solid #D9E2E8;'>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(f"**{listing['city']}**")
+            st.write(listing["description"])
+            st.markdown(
+                f"<div class='listing-price'>€{listing['price_per_month_eur']:.2f} / month</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div class='listing-meta'><b>{listing['size_sqm']} m²</b> · "
+                f"Available {listing['available_from']} – "
+                f"{listing['available_until'] or 'unlimited'}<br>"
+                f"Minimum stay: {listing['minimum_rental_days']} days</div>",
+                unsafe_allow_html=True,
+            )
 
         if st.session_state.get("user_email"):
             with st.form(f"request_listing_{listing['id']}"):
@@ -426,7 +461,7 @@ def show_listing_card(connection, listing):
 
 
 def show_rental_requests(connection, user_id):
-    st.subheader("My requests")
+    st.subheader("Requests")
     requests = db.get_rental_requests_for_user(connection, user_id)
     if not requests:
         st.info("No rental requests yet.")
@@ -443,7 +478,6 @@ def show_rental_requests(connection, user_id):
             f"**{request['title']}** — {request['start_date']} to "
             f"{request['end_date']} — **Status: {request['status']}**"
         )
-        show_request_chat(connection, user_id, request)
 
     st.markdown("#### Requests for my listings")
     if not incoming_requests:
@@ -453,7 +487,6 @@ def show_rental_requests(connection, user_id):
             f"**{request['title']}** — {request['start_date']} to "
             f"{request['end_date']} — **Status: {request['status']}**"
         )
-        show_request_chat(connection, user_id, request)
         if request["owner_id"] == user_id and request["status"] == "pending":
             columns = st.columns(2)
             for column, status, label in zip(
@@ -471,12 +504,34 @@ def show_rental_requests(connection, user_id):
                             st.rerun()
 
 
+def show_chats(connection, user_id):
+    st.subheader("Chats")
+    requests = db.get_rental_requests_for_user(connection, user_id)
+    if not requests:
+        st.info("No chats yet. Chats become available after a rental request is created.")
+        return
+
+    sent_requests = [request for request in requests if request["owner_id"] != user_id]
+    incoming_requests = [request for request in requests if request["owner_id"] == user_id]
+    chat_requests = sent_requests + incoming_requests
+
+    for request in chat_requests:
+        role = "Sent request" if request["owner_id"] != user_id else "Request for my listing"
+        st.markdown(
+            f"**{role}: {request['title']}** · "
+            f"Status: {request['status'].title()}"
+        )
+        show_request_chat(connection, user_id, request)
+
+
 def show_request_chat(connection, user_id, request):
     with st.expander("Open chat"):
         messages = get_messages(connection, request["id"], user_id)
+        mark_messages_read(connection, request["id"], user_id)
         if messages:
             for message in messages:
-                sender_role = (
+                is_current_user = message["sender_id"] == user_id
+                sender_role = "You" if is_current_user else (
                     "Renter" if message["sender_id"] == message["requester_id"]
                     else "Listing owner"
                 )
@@ -485,7 +540,7 @@ def show_request_chat(connection, user_id, request):
                     formatted_time = sent_at.strftime("%d %b %Y, %H:%M UTC")
                 except ValueError:
                     formatted_time = message["sent_at"]
-                with st.container(border=True):
+                with st.chat_message("user" if is_current_user else "assistant"):
                     st.markdown(f"**{sender_role}**")
                     st.caption(formatted_time)
                     st.write(message["message"])
@@ -671,8 +726,7 @@ def show_my_listings(connection, owner_id):
 
 def main():
     st.set_page_config(page_title="SpaceShare", page_icon="📦")
-    st.title("SpaceShare")
-    st.write("Find and offer storage space.")
+    show_brand_header()
 
     connection = get_connection()
     try:
@@ -684,30 +738,41 @@ def main():
             if user is None:
                 st.error("The logged-in account could not be found.")
             else:
-                find_tab, list_tab, requests_tab = st.tabs(
-                    ["Find storage", "List a space", "My requests"]
+                unread_count = get_unread_message_count(connection, user["id"])
+                chats_label = "Chats"
+                if unread_count:
+                    chats_label += " ①"
+                find_tab, list_tab, my_listings_tab, requests_tab, chats_tab = st.tabs(
+                    ["Find storage", "List a space", "My listings", "Requests", chats_label]
                 )
                 with find_tab:
                     show_listings(connection)
                 with list_tab:
                     show_listing_form(connection, user_email)
+                with my_listings_tab:
                     show_my_listings(connection, user["id"])
                 with requests_tab:
                     show_rental_requests(connection, user["id"])
+                with chats_tab:
+                    show_chats(connection, user["id"])
             if st.button("Log out"):
                 del st.session_state["user_email"]
                 st.rerun()
             return
 
-        find_tab, register_tab, login_tab = st.tabs(
-            ["Find storage", "Register", "Log in"]
-        )
-        with find_tab:
-            show_listings(connection)
-        with register_tab:
-            show_registration(connection)
-        with login_tab:
-            show_login(connection)
+        search_column, right_column = st.columns((4, 2), gap="large")
+        with search_column:
+            st.subheader("Find storage")
+            listings = show_listings(connection, include_map=False)
+        with right_column:
+            with st.expander("Register or log in"):
+                register_tab, login_tab = st.tabs(["Register", "Log in"])
+                with register_tab:
+                    show_registration(connection)
+                with login_tab:
+                    show_login(connection)
+            if listings:
+                show_listing_map(listings)
     finally:
         connection.close()
 

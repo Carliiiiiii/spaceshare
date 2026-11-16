@@ -67,6 +67,18 @@ def connect(database_path: Path) -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS message_reads (
+            rental_request_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            last_read_message_id INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (rental_request_id, user_id),
+            FOREIGN KEY (rental_request_id) REFERENCES rental_requests (id),
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """
+    )
     listing_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(listings)")
     }
@@ -414,3 +426,37 @@ def get_messages(connection, request_id, user_id):
            ORDER BY messages.sent_at ASC, messages.id ASC""",
         (request_id,),
     ).fetchall()
+
+
+def get_unread_message_count(connection, user_id):
+    """Count messages from other participants that the user has not read."""
+    return connection.execute(
+        """SELECT COUNT(*) FROM messages
+           JOIN rental_requests ON rental_requests.id = messages.rental_request_id
+           JOIN listings ON listings.id = rental_requests.listing_id
+           LEFT JOIN message_reads
+             ON message_reads.rental_request_id = messages.rental_request_id
+            AND message_reads.user_id = ?
+           WHERE (rental_requests.requester_id = ? OR listings.owner_id = ?)
+             AND messages.sender_id <> ?
+             AND messages.id > COALESCE(message_reads.last_read_message_id, 0)""",
+        (user_id, user_id, user_id, user_id),
+    ).fetchone()[0]
+
+
+def mark_messages_read(connection, request_id, user_id):
+    """Mark all current messages in a request as read for a participant."""
+    if not _user_is_request_participant(connection, request_id, user_id):
+        raise PermissionError("Only the renter and listing owner can read messages.")
+    latest = connection.execute(
+        "SELECT COALESCE(MAX(id), 0) FROM messages WHERE rental_request_id = ?",
+        (request_id,),
+    ).fetchone()[0]
+    connection.execute(
+        """INSERT INTO message_reads (rental_request_id, user_id, last_read_message_id)
+           VALUES (?, ?, ?)
+           ON CONFLICT(rental_request_id, user_id)
+           DO UPDATE SET last_read_message_id = excluded.last_read_message_id""",
+        (request_id, user_id, latest),
+    )
+    connection.commit()
