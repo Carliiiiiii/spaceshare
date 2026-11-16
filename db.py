@@ -33,6 +33,8 @@ def connect(database_path: Path) -> sqlite3.Connection:
             available_until TEXT,
             photo_data BLOB,
             photo_mime_type TEXT,
+            public_latitude REAL,
+            public_longitude REAL,
             minimum_rental_days INTEGER NOT NULL,
             FOREIGN KEY (owner_id) REFERENCES users (id)
         )
@@ -74,6 +76,10 @@ def connect(database_path: Path) -> sqlite3.Connection:
         connection.execute("ALTER TABLE listings ADD COLUMN photo_data BLOB")
     if "photo_mime_type" not in listing_columns:
         connection.execute("ALTER TABLE listings ADD COLUMN photo_mime_type TEXT")
+    if "public_latitude" not in listing_columns:
+        connection.execute("ALTER TABLE listings ADD COLUMN public_latitude REAL")
+    if "public_longitude" not in listing_columns:
+        connection.execute("ALTER TABLE listings ADD COLUMN public_longitude REAL")
     connection.commit()
     return connection
 
@@ -114,6 +120,9 @@ def create_listing(
     available_until: Optional[str] = None,
     photo_data: Optional[bytes] = None,
     photo_mime_type: Optional[str] = None,
+    *,
+    public_latitude: Optional[float] = None,
+    public_longitude: Optional[float] = None,
 ) -> int:
     """Store one storage listing and return its id."""
     cursor = connection.execute(
@@ -121,8 +130,9 @@ def create_listing(
         INSERT INTO listings (
             owner_id, title, city, description, size_sqm,
             price_per_month_eur, available_from, available_until,
-            photo_data, photo_mime_type, minimum_rental_days
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            photo_data, photo_mime_type, public_latitude, public_longitude,
+            minimum_rental_days
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             owner_id,
@@ -135,6 +145,8 @@ def create_listing(
             available_until,
             photo_data,
             photo_mime_type,
+            public_latitude,
+            public_longitude,
             minimum_rental_days,
         ),
     )
@@ -195,7 +207,7 @@ def get_listings(
     query = """
         SELECT id, title, city, description, size_sqm,
                price_per_month_eur, available_from, available_until,
-               photo_data, photo_mime_type,
+               photo_data, photo_mime_type, public_latitude, public_longitude,
                minimum_rental_days
         FROM listings
     """
@@ -211,7 +223,7 @@ def get_listings_by_owner(connection: sqlite3.Connection, owner_id: int) -> list
         """
         SELECT id, title, city, description, size_sqm,
                price_per_month_eur, available_from, available_until,
-               photo_data, photo_mime_type,
+               photo_data, photo_mime_type, public_latitude, public_longitude,
                minimum_rental_days
         FROM listings
         WHERE owner_id = ?
@@ -235,31 +247,46 @@ def update_listing(
     available_until: Optional[str] = None,
     photo_data: Optional[bytes] = None,
     photo_mime_type: Optional[str] = None,
+    *,
+    public_latitude: Optional[float] = None,
+    public_longitude: Optional[float] = None,
+    update_public_location: bool = False,
 ) -> None:
     """Update a listing only when the supplied owner owns it."""
+    assignments = [
+        "title = ?",
+        "city = ?",
+        "description = ?",
+        "size_sqm = ?",
+        "price_per_month_eur = ?",
+        "available_from = ?",
+        "available_until = ?",
+        "photo_data = ?",
+        "photo_mime_type = ?",
+        "minimum_rental_days = ?",
+    ]
+    parameters = [
+        title,
+        city,
+        description,
+        size_sqm,
+        price_per_month_eur,
+        available_from,
+        available_until,
+        photo_data,
+        photo_mime_type,
+        minimum_rental_days,
+    ]
+    if update_public_location:
+        assignments.extend(("public_latitude = ?", "public_longitude = ?"))
+        parameters.extend((public_latitude, public_longitude))
+
+    parameters.extend((listing_id, owner_id))
     cursor = connection.execute(
-        """
-        UPDATE listings
-        SET title = ?, city = ?, description = ?, size_sqm = ?,
-            price_per_month_eur = ?, available_from = ?,
-            available_until = ?, photo_data = ?, photo_mime_type = ?,
-            minimum_rental_days = ?
-        WHERE id = ? AND owner_id = ?
-        """,
-        (
-            title,
-            city,
-            description,
-            size_sqm,
-            price_per_month_eur,
-            available_from,
-            available_until,
-            photo_data,
-            photo_mime_type,
-            minimum_rental_days,
-            listing_id,
-            owner_id,
-        ),
+        "UPDATE listings SET "
+        + ", ".join(assignments)
+        + " WHERE id = ? AND owner_id = ?",
+        parameters,
     )
     if cursor.rowcount != 1:
         connection.rollback()

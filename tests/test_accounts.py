@@ -1,4 +1,5 @@
 from io import BytesIO
+import sqlite3
 
 import pytest
 from PIL import Image
@@ -130,6 +131,183 @@ def test_listing_without_end_date_is_unlimited(connection):
     )
 
     assert db.get_listings(connection)[0]["available_until"] is None
+
+
+def test_listing_public_location_is_rounded_and_available_to_map_views(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+    listing_id = create_listing(
+        connection,
+        owner_id,
+        "Map-ready storage",
+        "Lisbon",
+        "A dry room with an approximate map pin.",
+        8,
+        40,
+        "2026-12-01",
+        30,
+        public_latitude=38.726,
+        public_longitude=-9.134,
+    )
+
+    public_listing = db.get_listings(connection)[0]
+    owner_listing = db.get_listings_by_owner(connection, owner_id)[0]
+
+    assert public_listing["id"] == listing_id
+    assert public_listing["public_latitude"] == 38.73
+    assert public_listing["public_longitude"] == -9.13
+    assert "owner_id" not in public_listing.keys()
+    assert owner_listing["public_latitude"] == 38.73
+    assert owner_listing["public_longitude"] == -9.13
+
+
+@pytest.mark.parametrize(
+    ("public_latitude", "public_longitude"),
+    [
+        (38.72, None),
+        (None, -9.13),
+        (90.01, 0),
+        (-90.01, 0),
+        (0, 180.01),
+        (0, -180.01),
+        ("not a latitude", 0),
+        (0, "not a longitude"),
+        (float("inf"), 0),
+    ],
+)
+def test_listing_rejects_invalid_public_locations(
+    connection, public_latitude, public_longitude
+):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+
+    with pytest.raises(ValueError):
+        create_listing(
+            connection,
+            owner_id,
+            "Storage room",
+            "Lisbon",
+            "A dry room.",
+            8,
+            40,
+            "2026-12-01",
+            30,
+            public_latitude=public_latitude,
+            public_longitude=public_longitude,
+        )
+
+
+def test_listing_update_can_preserve_change_and_clear_public_location(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+    listing_id = create_listing(
+        connection,
+        owner_id,
+        "Map-ready storage",
+        "Lisbon",
+        "A dry room with an approximate map pin.",
+        8,
+        40,
+        "2026-12-01",
+        30,
+        public_latitude=38.72,
+        public_longitude=-9.14,
+    )
+
+    update_listing(
+        connection,
+        owner_id,
+        listing_id,
+        "Updated storage",
+        "Lisbon",
+        "An updated room.",
+        10,
+        45,
+        "2026-12-01",
+        30,
+    )
+    listing = db.get_listings(connection)[0]
+    assert listing["public_latitude"] == 38.72
+    assert listing["public_longitude"] == -9.14
+
+    update_listing(
+        connection,
+        owner_id,
+        listing_id,
+        "Updated storage",
+        "Porto",
+        "An updated room.",
+        10,
+        45,
+        "2026-12-01",
+        30,
+        public_latitude=41.154,
+        public_longitude=-8.629,
+        update_public_location=True,
+    )
+    listing = db.get_listings(connection)[0]
+    assert listing["public_latitude"] == 41.15
+    assert listing["public_longitude"] == -8.63
+
+    update_listing(
+        connection,
+        owner_id,
+        listing_id,
+        "Updated storage",
+        "Porto",
+        "An updated room.",
+        10,
+        45,
+        "2026-12-01",
+        30,
+        public_latitude=None,
+        public_longitude=None,
+        update_public_location=True,
+    )
+    listing = db.get_listings(connection)[0]
+    assert listing["public_latitude"] is None
+    assert listing["public_longitude"] is None
+
+
+def test_connect_migrates_existing_listing_for_public_map_locations(tmp_path):
+    database_path = tmp_path / "legacy_listing.sqlite3"
+    legacy_connection = sqlite3.connect(database_path)
+    legacy_connection.execute(
+        """
+        CREATE TABLE listings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            city TEXT NOT NULL,
+            description TEXT NOT NULL,
+            size_sqm REAL NOT NULL,
+            price_per_month_eur REAL NOT NULL,
+            available_from TEXT NOT NULL,
+            minimum_rental_days INTEGER NOT NULL
+        )
+        """
+    )
+    legacy_connection.execute(
+        """
+        INSERT INTO listings (
+            owner_id, title, city, description, size_sqm,
+            price_per_month_eur, available_from, minimum_rental_days
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (1, "Legacy listing", "Lisbon", "A legacy room.", 8, 40, "2026-12-01", 30),
+    )
+    legacy_connection.commit()
+    legacy_connection.close()
+
+    connection = db.connect(database_path)
+    try:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(listings)")
+        }
+        listing = db.get_listings(connection)[0]
+
+        assert {"public_latitude", "public_longitude"} <= columns
+        assert listing["public_latitude"] is None
+        assert listing["public_longitude"] is None
+    finally:
+        connection.close()
 
 
 def test_listing_filters_apply_all_criteria(connection):
