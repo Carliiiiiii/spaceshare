@@ -454,7 +454,7 @@ def update_listing(
         if not response.data:
             raise PermissionError("You do not own this listing.")
         if photo_data:
-            path = f"listings/{listing_id}"
+            path = f"listings/{listing_id}/{uuid.uuid4().hex}"
             connection.client.storage.from_(connection.settings.storage_bucket).upload(
                 path, photo_data, {"content-type": photo_mime_type, "upsert": "true"}
             )
