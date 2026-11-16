@@ -3,6 +3,7 @@
 import sqlite3
 from datetime import date, datetime, timezone
 from io import BytesIO
+from math import isfinite
 from typing import Optional
 
 from argon2 import PasswordHasher
@@ -15,6 +16,7 @@ import db
 password_hasher = PasswordHasher()
 MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024
 MAX_MESSAGE_LENGTH = 1000
+PUBLIC_LOCATION_DECIMAL_PLACES = 2
 
 
 def normalize_email(email: str) -> str:
@@ -68,6 +70,9 @@ def create_listing(
     available_until: Optional[str] = None,
     photo_data: Optional[bytes] = None,
     photo_mime_type: Optional[str] = None,
+    *,
+    public_latitude: Optional[float] = None,
+    public_longitude: Optional[float] = None,
 ) -> int:
     """Validate and create a listing for an authenticated owner."""
     values = _validated_listing_values(
@@ -81,8 +86,17 @@ def create_listing(
         available_until,
     )
     photo_data, photo_mime_type = validate_photo(photo_data, photo_mime_type)
+    public_latitude, public_longitude = validate_public_location(
+        public_latitude, public_longitude
+    )
     return db.create_listing(
-        connection, owner_id, *values, photo_data, photo_mime_type
+        connection,
+        owner_id,
+        *values,
+        photo_data,
+        photo_mime_type,
+        public_latitude=public_latitude,
+        public_longitude=public_longitude,
     )
 
 
@@ -107,6 +121,32 @@ def validate_photo(
     if image_format not in mime_types:
         raise ValueError("Photo must be a valid JPG or PNG image.")
     return photo_data, mime_types[image_format]
+
+
+def validate_public_location(
+    public_latitude: Optional[float], public_longitude: Optional[float]
+) -> tuple:
+    """Validate and round an optional, intentionally approximate map point."""
+    if (public_latitude is None) != (public_longitude is None):
+        raise ValueError("Select both map coordinates or leave both empty.")
+    if public_latitude is None:
+        return None, None
+
+    try:
+        latitude = float(public_latitude)
+        longitude = float(public_longitude)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Map coordinates must be numbers.") from error
+
+    if not isfinite(latitude) or not -90 <= latitude <= 90:
+        raise ValueError("Map latitude must be between -90 and 90.")
+    if not isfinite(longitude) or not -180 <= longitude <= 180:
+        raise ValueError("Map longitude must be between -180 and 180.")
+
+    return (
+        round(latitude, PUBLIC_LOCATION_DECIMAL_PLACES),
+        round(longitude, PUBLIC_LOCATION_DECIMAL_PLACES),
+    )
 
 
 def _validated_listing_values(
@@ -179,6 +219,10 @@ def update_listing(
     available_until: Optional[str] = None,
     photo_data: Optional[bytes] = None,
     photo_mime_type: Optional[str] = None,
+    *,
+    public_latitude: Optional[float] = None,
+    public_longitude: Optional[float] = None,
+    update_public_location: bool = False,
 ) -> None:
     """Validate and update a listing only for its owner."""
     values = _validated_listing_values(
@@ -192,6 +236,14 @@ def update_listing(
         available_until,
     )
     photo_data, photo_mime_type = validate_photo(photo_data, photo_mime_type)
+    if update_public_location:
+        public_latitude, public_longitude = validate_public_location(
+            public_latitude, public_longitude
+        )
+    elif public_latitude is not None or public_longitude is not None:
+        raise ValueError(
+            "Set update_public_location to update map coordinates."
+        )
     db.update_listing(
         connection,
         listing_id,
@@ -199,6 +251,9 @@ def update_listing(
         *values,
         photo_data,
         photo_mime_type,
+        public_latitude=public_latitude,
+        public_longitude=public_longitude,
+        update_public_location=update_public_location,
     )
 
 
