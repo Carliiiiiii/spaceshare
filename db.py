@@ -541,24 +541,6 @@ def delete_listing(
 
 def create_rental_request(connection, listing_id, requester_id, start_date, end_date):
     if isinstance(connection, SupabaseConnection):
-        request = (
-            connection.client.table("rental_requests")
-            .select("requester_id,listing_id")
-            .eq("id", request_id)
-            .limit(1)
-            .execute()
-            .data
-            or []
-        )
-        owner = (
-            connection.client.table("listings")
-            .select("owner_id")
-            .eq("id", request[0]["listing_id"])
-            .limit(1)
-            .execute()
-            .data
-            or []
-        ) if request else []
         response = (
             connection.client.table("rental_requests")
             .insert({
@@ -815,6 +797,24 @@ def get_messages(connection, request_id, user_id):
     if not _user_is_request_participant(connection, request_id, user_id):
         raise PermissionError("Only the renter and listing owner can read messages.")
     if isinstance(connection, SupabaseConnection):
+        request = (
+            connection.client.table("rental_requests")
+            .select("requester_id,listing_id")
+            .eq("id", request_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        owner = (
+            connection.client.table("listings")
+            .select("owner_id")
+            .eq("id", request[0]["listing_id"])
+            .limit(1)
+            .execute()
+            .data
+            or []
+        ) if request else []
         response = (
             connection.client.table("messages")
             .select("id,message,sent_at,sender_id")
