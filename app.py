@@ -152,7 +152,8 @@ def show_login(connection, cookie_manager):
                     secure=False,
                     same_site="lax",
                 )
-                st.rerun()
+                st.success("Logged in. Refresh the page to continue.")
+                st.stop()
             else:
                 st.error("Invalid email or password.")
 
