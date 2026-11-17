@@ -147,6 +147,7 @@ def show_login(connection, cookie_manager):
                 cookie_manager.set(
                     COOKIE_NAME,
                     create_session(normalized_email, st.secrets),
+                    key="set_session_cookie",
                     max_age=SESSION_TTL_SECONDS,
                     secure=False,
                     same_site="lax",
