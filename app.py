@@ -15,11 +15,16 @@ from logic import (
     create_rental_request,
     create_listing,
     delete_listing,
+    get_listing_conversation_messages,
+    get_listing_conversations,
     get_messages,
     get_pending_incoming_rental_request_count,
     get_unread_message_count,
+    mark_listing_conversation_messages_read,
     mark_messages_read,
     register_user,
+    send_listing_conversation_message,
+    send_listing_question,
     send_message,
     update_listing,
     verify_user_password,
@@ -456,6 +461,44 @@ def show_listing_card(connection, listing):
             )
 
         if st.session_state.get("user_email"):
+            user = db.get_user_by_email(
+                connection, st.session_state["user_email"]
+            )
+            if user is None:
+                st.error("The logged-in account could not be found.")
+                return
+
+            if db.is_listing_owner(connection, listing["id"], user["id"]):
+                st.caption("This is your listing.")
+                return
+
+            question_form_key = f"listing_question_open_{listing['id']}"
+            if st.button("Chat about this listing", key=f"chat_listing_{listing['id']}"):
+                st.session_state[question_form_key] = True
+
+            if st.session_state.get(question_form_key):
+                with st.form(f"question_listing_{listing['id']}"):
+                    question_text = st.text_area(
+                        "Ask the listing owner a question",
+                        max_chars=1000,
+                        key=f"listing_question_text_{listing['id']}",
+                    )
+                    question_submitted = st.form_submit_button("Send question")
+
+                if question_submitted:
+                    try:
+                        send_listing_question(
+                            connection,
+                            listing["id"],
+                            user["id"],
+                            question_text,
+                        )
+                    except (ValueError, PermissionError) as error:
+                        st.error(str(error))
+                    else:
+                        st.session_state[question_form_key] = False
+                        st.success("Question sent. Continue the conversation in Chats.")
+
             with st.form(f"request_listing_{listing['id']}"):
                 request_start = st.date_input(
                     "Rental start date",
@@ -470,10 +513,6 @@ def show_listing_card(connection, listing):
                 )
 
             if request_submitted:
-                user = db.get_user_by_email(
-                    connection,
-                    st.session_state["user_email"],
-                )
                 try:
                     create_rental_request(
                         connection,
@@ -486,6 +525,8 @@ def show_listing_card(connection, listing):
                     st.error(str(error))
                 else:
                     st.success("Rental request sent.")
+        else:
+            st.caption("Log in to ask a question or send a rental request.")
 
 
 def show_rental_requests(connection, user_id):
@@ -535,21 +576,95 @@ def show_rental_requests(connection, user_id):
 def show_chats(connection, user_id):
     st.subheader("Chats")
     requests = db.get_rental_requests_for_user(connection, user_id)
-    if not requests:
-        st.info("No chats yet. Chats become available after a rental request is created.")
+    listing_conversations = get_listing_conversations(connection, user_id)
+    if not requests and not listing_conversations:
+        st.info("No chats yet. Ask a question on a listing or send a rental request.")
         return
 
-    sent_requests = [request for request in requests if request["owner_id"] != user_id]
-    incoming_requests = [request for request in requests if request["owner_id"] == user_id]
-    chat_requests = sent_requests + incoming_requests
+    if listing_conversations:
+        st.markdown("#### Questions about listings")
+        for conversation in listing_conversations:
+            role = (
+                "Question about your listing"
+                if conversation["owner_id"] == user_id
+                else "Your question"
+            )
+            st.markdown(f"**{role}: {conversation['title']}**")
+            show_listing_conversation_chat(connection, user_id, conversation)
 
-    for request in chat_requests:
-        role = "Sent request" if request["owner_id"] != user_id else "Request for my listing"
-        st.markdown(
-            f"**{role}: {request['title']}** · "
-            f"Status: {request['status'].title()}"
+    if requests:
+        st.markdown("#### Rental-request chats")
+        sent_requests = [
+            request for request in requests if request["owner_id"] != user_id
+        ]
+        incoming_requests = [
+            request for request in requests if request["owner_id"] == user_id
+        ]
+        chat_requests = sent_requests + incoming_requests
+
+        for request in chat_requests:
+            role = (
+                "Sent request"
+                if request["owner_id"] != user_id
+                else "Request for my listing"
+            )
+            st.markdown(
+                f"**{role}: {request['title']}** · "
+                f"Status: {request['status'].title()}"
+            )
+            show_request_chat(connection, user_id, request)
+
+
+def show_listing_conversation_chat(connection, user_id, conversation):
+    with st.expander("Open chat"):
+        messages = get_listing_conversation_messages(
+            connection, conversation["id"], user_id
         )
-        show_request_chat(connection, user_id, request)
+        mark_listing_conversation_messages_read(
+            connection, conversation["id"], user_id
+        )
+        if messages:
+            for message in messages:
+                is_current_user = message["sender_id"] == user_id
+                sender_role = "You" if is_current_user else (
+                    "Interested user"
+                    if message["sender_id"] == message["participant_id"]
+                    else "Listing owner"
+                )
+                try:
+                    sent_at = datetime.fromisoformat(message["sent_at"])
+                    formatted_time = sent_at.strftime("%d %b %Y, %H:%M UTC")
+                except ValueError:
+                    formatted_time = message["sent_at"]
+                with st.chat_message("user" if is_current_user else "assistant"):
+                    st.markdown(f"**{sender_role}**")
+                    st.caption(formatted_time)
+                    st.write(message["message"])
+        else:
+            st.info("No messages yet.")
+
+        with st.form(f"listing_conversation_message_form_{conversation['id']}"):
+            message_text = st.text_area(
+                "Message",
+                max_chars=1000,
+                key=f"listing_conversation_message_text_{conversation['id']}",
+            )
+            send_submitted = st.form_submit_button("Send message")
+        if send_submitted:
+            try:
+                send_listing_conversation_message(
+                    connection, conversation["id"], user_id, message_text
+                )
+            except (ValueError, PermissionError) as error:
+                st.error(str(error))
+            else:
+                st.success("Message sent.")
+
+        if st.button(
+            "Refresh messages",
+            key=f"refresh_listing_conversation_{conversation['id']}",
+        ):
+            st.rerun()
 
 
 def show_request_chat(connection, user_id, request):

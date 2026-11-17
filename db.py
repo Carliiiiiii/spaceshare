@@ -82,6 +82,44 @@ def connect(database_path: Path) -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS listing_conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id INTEGER NOT NULL,
+            participant_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(listing_id, participant_id),
+            FOREIGN KEY (listing_id) REFERENCES listings (id),
+            FOREIGN KEY (participant_id) REFERENCES users (id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS listing_conversation_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL,
+            sender_id INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            sent_at TEXT NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES listing_conversations (id),
+            FOREIGN KEY (sender_id) REFERENCES users (id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS listing_conversation_reads (
+            conversation_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            last_read_message_id INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (conversation_id, user_id),
+            FOREIGN KEY (conversation_id) REFERENCES listing_conversations (id),
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """
+    )
     listing_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(listings)")
     }
@@ -900,8 +938,10 @@ def get_unread_message_count(connection, user_id):
             )
             last_read = read[0]["last_read_message_id"] if read else 0
             total += sum(1 for message in messages if message["id"] > last_read and message["sender_id"] != user_id)
-        return total
-    return connection.execute(
+        return total + get_unread_listing_conversation_message_count(
+            connection, user_id
+        )
+    rental_message_count = connection.execute(
         """SELECT COUNT(*) FROM messages
            JOIN rental_requests ON rental_requests.id = messages.rental_request_id
            JOIN listings ON listings.id = rental_requests.listing_id
@@ -913,6 +953,9 @@ def get_unread_message_count(connection, user_id):
              AND messages.id > COALESCE(message_reads.last_read_message_id, 0)""",
         (user_id, user_id, user_id, user_id),
     ).fetchone()[0]
+    return rental_message_count + get_unread_listing_conversation_message_count(
+        connection, user_id
+    )
 
 
 def mark_messages_read(connection, request_id, user_id):
@@ -938,5 +981,377 @@ def mark_messages_read(connection, request_id, user_id):
            ON CONFLICT(rental_request_id, user_id)
            DO UPDATE SET last_read_message_id = excluded.last_read_message_id""",
         (request_id, user_id, latest),
+    )
+    connection.commit()
+
+
+def _get_listing_owner_id(connection, listing_id):
+    if isinstance(connection, SupabaseConnection):
+        listing = (
+            connection.client.table("listings")
+            .select("owner_id")
+            .eq("id", listing_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return listing[0]["owner_id"] if listing else None
+    row = connection.execute(
+        "SELECT owner_id FROM listings WHERE id = ?", (listing_id,)
+    ).fetchone()
+    return row["owner_id"] if row else None
+
+
+def is_listing_owner(connection, listing_id, user_id):
+    """Return whether a user owns the specified listing."""
+    return _get_listing_owner_id(connection, listing_id) == user_id
+
+
+def get_or_create_listing_conversation(
+    connection, listing_id, participant_id, created_at
+):
+    """Return the direct conversation for a listing and interested user."""
+    owner_id = _get_listing_owner_id(connection, listing_id)
+    if owner_id is None:
+        raise ValueError("Listing not found.")
+    if owner_id == participant_id:
+        raise PermissionError("You cannot start a chat about your own listing.")
+
+    if isinstance(connection, SupabaseConnection):
+        existing = (
+            connection.client.table("listing_conversations")
+            .select("id")
+            .eq("listing_id", listing_id)
+            .eq("participant_id", participant_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if existing:
+            return int(existing[0]["id"])
+        try:
+            response = (
+                connection.client.table("listing_conversations")
+                .insert(
+                    {
+                        "listing_id": listing_id,
+                        "participant_id": participant_id,
+                        "created_at": created_at,
+                    }
+                )
+                .execute()
+            )
+        except Exception as error:
+            existing = (
+                connection.client.table("listing_conversations")
+                .select("id")
+                .eq("listing_id", listing_id)
+                .eq("participant_id", participant_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if existing:
+                return int(existing[0]["id"])
+            raise ValueError("The conversation could not be started.") from error
+        if not response.data:
+            raise ValueError("The conversation could not be started.")
+        return int(response.data[0]["id"])
+
+    connection.execute(
+        """INSERT INTO listing_conversations (listing_id, participant_id, created_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(listing_id, participant_id) DO NOTHING""",
+        (listing_id, participant_id, created_at),
+    )
+    connection.commit()
+    return connection.execute(
+        """SELECT id FROM listing_conversations
+           WHERE listing_id = ? AND participant_id = ?""",
+        (listing_id, participant_id),
+    ).fetchone()["id"]
+
+
+def _get_listing_conversation(connection, conversation_id):
+    if isinstance(connection, SupabaseConnection):
+        conversation = (
+            connection.client.table("listing_conversations")
+            .select("id,listing_id,participant_id,created_at")
+            .eq("id", conversation_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not conversation:
+            return None
+        listing = (
+            connection.client.table("listings")
+            .select("owner_id,title")
+            .eq("id", conversation[0]["listing_id"])
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not listing:
+            return None
+        return {
+            **conversation[0],
+            "owner_id": listing[0]["owner_id"],
+            "title": listing[0]["title"],
+        }
+    return connection.execute(
+        """SELECT conversations.id, conversations.listing_id,
+                  conversations.participant_id, conversations.created_at,
+                  listings.owner_id, listings.title
+           FROM listing_conversations AS conversations
+           JOIN listings ON listings.id = conversations.listing_id
+           WHERE conversations.id = ?""",
+        (conversation_id,),
+    ).fetchone()
+
+
+def _user_is_listing_conversation_participant(connection, conversation_id, user_id):
+    conversation = _get_listing_conversation(connection, conversation_id)
+    return bool(
+        conversation
+        and (
+            conversation["participant_id"] == user_id
+            or conversation["owner_id"] == user_id
+        )
+    )
+
+
+def get_listing_conversations_for_user(connection, user_id):
+    """Return direct listing conversations visible to the current user."""
+    if isinstance(connection, SupabaseConnection):
+        owned_listings = (
+            connection.client.table("listings")
+            .select("id,title,owner_id")
+            .eq("owner_id", user_id)
+            .execute()
+            .data
+            or []
+        )
+        listings_by_id = {listing["id"]: listing for listing in owned_listings}
+        participant_conversations = (
+            connection.client.table("listing_conversations")
+            .select("id,listing_id,participant_id,created_at")
+            .eq("participant_id", user_id)
+            .execute()
+            .data
+            or []
+        )
+        incoming_conversations = []
+        if listings_by_id:
+            incoming_conversations = (
+                connection.client.table("listing_conversations")
+                .select("id,listing_id,participant_id,created_at")
+                .in_("listing_id", list(listings_by_id))
+                .execute()
+                .data
+                or []
+            )
+        conversations = {
+            conversation["id"]: conversation
+            for conversation in participant_conversations + incoming_conversations
+        }.values()
+        result = []
+        for conversation in conversations:
+            listing = listings_by_id.get(conversation["listing_id"])
+            if listing is None:
+                listing_result = (
+                    connection.client.table("listings")
+                    .select("id,title,owner_id")
+                    .eq("id", conversation["listing_id"])
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                if not listing_result:
+                    continue
+                listing = listing_result[0]
+            result.append(
+                {
+                    **conversation,
+                    "title": listing["title"],
+                    "owner_id": listing["owner_id"],
+                }
+            )
+        return sorted(
+            result,
+            key=lambda conversation: (
+                conversation["created_at"],
+                conversation["id"],
+            ),
+            reverse=True,
+        )
+    return connection.execute(
+        """SELECT conversations.id, conversations.listing_id,
+                  conversations.participant_id, conversations.created_at,
+                  listings.title, listings.owner_id
+           FROM listing_conversations AS conversations
+           JOIN listings ON listings.id = conversations.listing_id
+           WHERE conversations.participant_id = ? OR listings.owner_id = ?
+           ORDER BY conversations.created_at DESC, conversations.id DESC""",
+        (user_id, user_id),
+    ).fetchall()
+
+
+def create_listing_conversation_message(
+    connection, conversation_id, sender_id, message, sent_at
+):
+    """Store a message only when its sender participates in the conversation."""
+    if not _user_is_listing_conversation_participant(
+        connection, conversation_id, sender_id
+    ):
+        raise PermissionError(
+            "Only the interested user and listing owner can send messages."
+        )
+    if isinstance(connection, SupabaseConnection):
+        response = (
+            connection.client.table("listing_conversation_messages")
+            .insert(
+                {
+                    "conversation_id": conversation_id,
+                    "sender_id": sender_id,
+                    "message": message,
+                    "sent_at": sent_at,
+                }
+            )
+            .execute()
+        )
+        if not response.data:
+            raise ValueError("The message could not be sent.")
+        return int(response.data[0]["id"])
+    cursor = connection.execute(
+        """INSERT INTO listing_conversation_messages
+           (conversation_id, sender_id, message, sent_at)
+           VALUES (?, ?, ?, ?)""",
+        (conversation_id, sender_id, message, sent_at),
+    )
+    connection.commit()
+    return int(cursor.lastrowid)
+
+
+def get_listing_conversation_messages(connection, conversation_id, user_id):
+    """Return direct conversation messages only to either participant."""
+    if not _user_is_listing_conversation_participant(
+        connection, conversation_id, user_id
+    ):
+        raise PermissionError(
+            "Only the interested user and listing owner can read messages."
+        )
+    conversation = _get_listing_conversation(connection, conversation_id)
+    if isinstance(connection, SupabaseConnection):
+        response = (
+            connection.client.table("listing_conversation_messages")
+            .select("id,message,sent_at,sender_id")
+            .eq("conversation_id", conversation_id)
+            .order("sent_at")
+            .order("id")
+            .execute()
+        )
+        return [
+            {
+                **message,
+                "participant_id": conversation["participant_id"],
+                "owner_id": conversation["owner_id"],
+            }
+            for message in (response.data or [])
+        ]
+    return connection.execute(
+        """SELECT messages.id, messages.message, messages.sent_at,
+                  messages.sender_id, conversations.participant_id,
+                  listings.owner_id
+           FROM listing_conversation_messages AS messages
+           JOIN listing_conversations AS conversations
+             ON conversations.id = messages.conversation_id
+           JOIN listings ON listings.id = conversations.listing_id
+           WHERE messages.conversation_id = ?
+           ORDER BY messages.sent_at ASC, messages.id ASC""",
+        (conversation_id,),
+    ).fetchall()
+
+
+def get_unread_listing_conversation_message_count(connection, user_id):
+    """Count unread direct-listing messages from the other participant."""
+    if isinstance(connection, SupabaseConnection):
+        total = 0
+        for conversation in get_listing_conversations_for_user(connection, user_id):
+            messages = get_listing_conversation_messages(
+                connection, conversation["id"], user_id
+            )
+            read = (
+                connection.client.table("listing_conversation_reads")
+                .select("last_read_message_id")
+                .eq("conversation_id", conversation["id"])
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            last_read = read[0]["last_read_message_id"] if read else 0
+            total += sum(
+                1
+                for message in messages
+                if message["id"] > last_read and message["sender_id"] != user_id
+            )
+        return total
+    return connection.execute(
+        """SELECT COUNT(*)
+           FROM listing_conversation_messages AS messages
+           JOIN listing_conversations AS conversations
+             ON conversations.id = messages.conversation_id
+           JOIN listings ON listings.id = conversations.listing_id
+           LEFT JOIN listing_conversation_reads AS reads
+             ON reads.conversation_id = messages.conversation_id
+            AND reads.user_id = ?
+           WHERE (conversations.participant_id = ? OR listings.owner_id = ?)
+             AND messages.sender_id <> ?
+             AND messages.id > COALESCE(reads.last_read_message_id, 0)""",
+        (user_id, user_id, user_id, user_id),
+    ).fetchone()[0]
+
+
+def mark_listing_conversation_messages_read(connection, conversation_id, user_id):
+    """Mark all direct-listing messages currently visible to a user as read."""
+    if not _user_is_listing_conversation_participant(
+        connection, conversation_id, user_id
+    ):
+        raise PermissionError(
+            "Only the interested user and listing owner can read messages."
+        )
+    if isinstance(connection, SupabaseConnection):
+        messages = get_listing_conversation_messages(
+            connection, conversation_id, user_id
+        )
+        latest = messages[-1]["id"] if messages else 0
+        connection.client.table("listing_conversation_reads").upsert(
+            {
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+                "last_read_message_id": latest,
+            }
+        ).execute()
+        return
+    latest = connection.execute(
+        """SELECT COALESCE(MAX(id), 0)
+           FROM listing_conversation_messages WHERE conversation_id = ?""",
+        (conversation_id,),
+    ).fetchone()[0]
+    connection.execute(
+        """INSERT INTO listing_conversation_reads
+           (conversation_id, user_id, last_read_message_id)
+           VALUES (?, ?, ?)
+           ON CONFLICT(conversation_id, user_id)
+           DO UPDATE SET last_read_message_id = excluded.last_read_message_id""",
+        (conversation_id, user_id, latest),
     )
     connection.commit()
