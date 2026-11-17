@@ -133,6 +133,24 @@ def test_listing_without_end_date_is_unlimited(connection):
     assert db.get_listings(connection)[0]["available_until"] is None
 
 
+def test_sqlite_listing_rows_include_an_empty_photo_url(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+    create_listing(
+        connection,
+        owner_id,
+        "Storage room",
+        "Lisbon",
+        "A dry room.",
+        8,
+        40,
+        "2026-12-01",
+        30,
+    )
+
+    assert db.get_listings(connection)[0]["photo_url"] is None
+    assert db.get_listings_by_owner(connection, owner_id)[0]["photo_url"] is None
+
+
 def test_listing_public_location_is_rounded_and_available_to_map_views(connection):
     owner_id = register_user(connection, "owner@example.com", "secret")
     listing_id = create_listing(
