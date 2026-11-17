@@ -123,7 +123,7 @@ def show_registration(connection):
             st.success("Account created. You can now log in.")
 
 
-def show_login(connection):
+def show_login(connection, cookie_manager):
     st.subheader("Log in")
     with st.form("login_form"):
         email = st.text_input("Email address", key="login_email")
@@ -139,11 +139,11 @@ def show_login(connection):
             if valid_password:
                 normalized_email = email.strip().lower()
                 st.session_state["user_email"] = normalized_email
-                cookie_manager = get_cookie_manager()
                 cookie_manager.set(
                     COOKIE_NAME,
                     create_session(normalized_email, st.secrets),
                     max_age=SESSION_TTL_SECONDS,
+                    secure=False,
                     same_site="lax",
                 )
                 st.rerun()
@@ -853,7 +853,7 @@ def main():
                 with register_tab:
                     show_registration(connection)
                 with login_tab:
-                    show_login(connection)
+                    show_login(connection, cookie_manager)
             if listings:
                 show_listing_map(listings)
     finally:
