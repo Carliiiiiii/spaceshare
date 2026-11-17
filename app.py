@@ -69,6 +69,11 @@ def restore_logged_in_user(connection, cookie_manager):
     current_email = st.session_state.get("user_email")
     if current_email:
         return current_email
+    # CookieManager receives browser cookies through a component iframe. On a
+    # fresh Streamlit run, give that iframe one rerun to return its first value.
+    if not st.session_state.get("session_cookie_initialized"):
+        st.session_state["session_cookie_initialized"] = True
+        st.rerun()
     token = cookie_manager.get(COOKIE_NAME)
     email = read_session(token, st.secrets)
     if email is None:
