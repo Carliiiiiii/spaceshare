@@ -301,8 +301,11 @@ def show_listing_form(connection, user_email):
         available_from = st.date_input("Available from")
         available_until = st.date_input("Available until (optional)", value=None)
         uploaded_photo = st.file_uploader(
-            "Photo (optional, JPG or PNG, max 5 MB)",
+            "Photo (optional — drag and drop or browse; JPG/PNG, max 5 MB)",
             type=["jpg", "jpeg", "png"],
+            help="Drag and drop one image here or choose it from your device.",
+            max_upload_size=5,
+            width="stretch",
         )
         minimum_days = st.number_input(
             "Minimum rental duration in days", min_value=0, step=1
@@ -683,9 +686,12 @@ def show_my_listings(connection, owner_id):
                 elif photo_data:
                     st.image(photo_data, caption="Current photo")
                 uploaded_photo = st.file_uploader(
-                    "Replace photo (optional)",
+                    "Replace photo (optional — drag and drop or browse; JPG/PNG, max 5 MB)",
                     type=["jpg", "jpeg", "png"],
                     key=f"photo_upload_{listing['id']}",
+                    help="Drag and drop one image here or choose it from your device.",
+                    max_upload_size=5,
+                    width="stretch",
                 )
                 remove_photo = st.checkbox(
                     "Remove current photo",
