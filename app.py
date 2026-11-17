@@ -7,7 +7,9 @@ from pathlib import Path
 import folium
 import streamlit as st
 from streamlit_folium import st_folium
+from extra_streamlit_components import CookieManager
 
+from auth_session import COOKIE_NAME, SESSION_TTL_SECONDS, create_session, read_session
 import db
 from supabase_backend import create_supabase_client
 from logic import (
@@ -55,6 +57,29 @@ def get_connection():
             st.error(f"Online database configuration error: {error}")
             st.stop()
     return db.connect(DATABASE_PATH)
+
+
+def get_cookie_manager():
+    """Return the browser-cookie component used for the signed session token."""
+    return CookieManager(key="spaceshare_session_cookie")
+
+
+def restore_logged_in_user(connection, cookie_manager):
+    """Restore a user from a valid signed cookie, or clear an expired one."""
+    current_email = st.session_state.get("user_email")
+    if current_email:
+        return current_email
+    token = cookie_manager.get(COOKIE_NAME)
+    email = read_session(token, st.secrets)
+    if email is None:
+        if token:
+            cookie_manager.delete(COOKIE_NAME)
+        return None
+    if db.get_user_by_email(connection, email) is None:
+        cookie_manager.delete(COOKIE_NAME)
+        return None
+    st.session_state["user_email"] = email
+    return email
 
 
 def show_brand_header():
@@ -112,7 +137,15 @@ def show_login(connection):
             st.error(str(error))
         else:
             if valid_password:
-                st.session_state["user_email"] = email.strip().lower()
+                normalized_email = email.strip().lower()
+                st.session_state["user_email"] = normalized_email
+                cookie_manager = get_cookie_manager()
+                cookie_manager.set(
+                    COOKIE_NAME,
+                    create_session(normalized_email, st.secrets),
+                    max_age=SESSION_TTL_SECONDS,
+                    same_site="lax",
+                )
                 st.rerun()
             else:
                 st.error("Invalid email or password.")
@@ -765,8 +798,9 @@ def main():
     show_brand_header()
 
     connection = get_connection()
+    cookie_manager = get_cookie_manager()
     try:
-        user_email = st.session_state.get("user_email")
+        user_email = restore_logged_in_user(connection, cookie_manager)
 
         if user_email:
             st.success(f"Welcome, {user_email}!")
@@ -804,6 +838,7 @@ def main():
                 with chats_tab:
                     show_chats(connection, user["id"])
             if st.button("Log out"):
+                cookie_manager.delete(COOKIE_NAME)
                 del st.session_state["user_email"]
                 st.rerun()
             return
