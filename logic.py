@@ -304,11 +304,7 @@ def update_rental_request_status(connection, request_id, owner_id, status):
 
 def send_message(connection, request_id, sender_id, message):
     """Validate and send a message as a participant in a request."""
-    if not isinstance(message, str) or not message.strip():
-        raise ValueError("Message cannot be empty.")
-    cleaned_message = message.strip()
-    if len(cleaned_message) > MAX_MESSAGE_LENGTH:
-        raise ValueError("Message must be 1000 characters or fewer.")
+    cleaned_message = _validated_message_text(message)
     sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return db.create_message(
         connection, request_id, sender_id, cleaned_message, sent_at
@@ -318,6 +314,55 @@ def send_message(connection, request_id, sender_id, message):
 def get_messages(connection, request_id, user_id):
     """Return messages only for a renter or the listing owner."""
     return db.get_messages(connection, request_id, user_id)
+
+
+def start_listing_conversation(connection, listing_id, participant_id):
+    """Create or return a direct conversation about a listing."""
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return db.get_or_create_listing_conversation(
+        connection, listing_id, participant_id, created_at
+    )
+
+
+def send_listing_conversation_message(connection, conversation_id, sender_id, message):
+    """Validate and send a direct listing-chat message."""
+    cleaned_message = _validated_message_text(message)
+    sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return db.create_listing_conversation_message(
+        connection, conversation_id, sender_id, cleaned_message, sent_at
+    )
+
+
+def send_listing_question(connection, listing_id, sender_id, message):
+    """Start or reuse a listing conversation and send its first question."""
+    _validated_message_text(message)
+    conversation_id = start_listing_conversation(connection, listing_id, sender_id)
+    send_listing_conversation_message(connection, conversation_id, sender_id, message)
+    return conversation_id
+
+
+def _validated_message_text(message):
+    """Return a non-empty, safely sized message string."""
+    if not isinstance(message, str) or not message.strip():
+        raise ValueError("Message cannot be empty.")
+    cleaned_message = message.strip()
+    if len(cleaned_message) > MAX_MESSAGE_LENGTH:
+        raise ValueError("Message must be 1000 characters or fewer.")
+    return cleaned_message
+
+
+def get_listing_conversations(connection, user_id):
+    """Return direct listing conversations visible to a user."""
+    return db.get_listing_conversations_for_user(connection, user_id)
+
+
+def get_listing_conversation_messages(connection, conversation_id, user_id):
+    """Return direct listing-chat messages only for either participant."""
+    return db.get_listing_conversation_messages(connection, conversation_id, user_id)
+
+
+def mark_listing_conversation_messages_read(connection, conversation_id, user_id):
+    db.mark_listing_conversation_messages_read(connection, conversation_id, user_id)
 
 
 def get_unread_message_count(connection, user_id):
