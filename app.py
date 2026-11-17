@@ -16,6 +16,7 @@ from logic import (
     create_listing,
     delete_listing,
     get_messages,
+    get_pending_incoming_rental_request_count,
     get_unread_message_count,
     mark_messages_read,
     register_user,
@@ -35,11 +36,24 @@ DEFAULT_MAP_CENTER = (38.7223, -9.1393)
 def get_connection():
     """Open a database connection for the current Streamlit run."""
     try:
-        if "SUPABASE_URL" in st.secrets and "SUPABASE_SERVICE_ROLE_KEY" in st.secrets:
-            return create_supabase_client(st.secrets)
+        has_supabase_settings = (
+            "SUPABASE_URL" in st.secrets
+            and "SUPABASE_SERVICE_ROLE_KEY" in st.secrets
+        )
+    except FileNotFoundError:
+        # Streamlit raises this when no local secrets file exists. Supabase is
+        # optional, so local development continues with the SQLite backend.
+        return db.connect(DATABASE_PATH)
     except Exception as error:
         st.error(f"Online database configuration error: {error}")
         st.stop()
+
+    if has_supabase_settings:
+        try:
+            return create_supabase_client(st.secrets)
+        except Exception as error:
+            st.error(f"Online database configuration error: {error}")
+            st.stop()
     return db.connect(DATABASE_PATH)
 
 
@@ -406,13 +420,15 @@ def show_listings(connection, include_map=True):
 
 def show_listing_card(connection, listing):
     """Render one public listing card in the list half of the browse view."""
+    photo_url = listing["photo_url"]
+    photo_data = listing["photo_data"]
     with st.container(border=True):
         media_column, details_column = st.columns((1, 2), gap="large")
         with media_column:
-            if listing.get("photo_url"):
-                st.image(listing["photo_url"])
-            elif listing.get("photo_data"):
-                st.image(listing["photo_data"])
+            if photo_url:
+                st.image(photo_url)
+            elif photo_data:
+                st.image(photo_data)
             else:
                 st.info("No photo available.")
         with details_column:
@@ -660,10 +676,12 @@ def show_my_listings(connection, owner_id):
                         else None
                     ),
                 )
-                if listing.get("photo_url"):
-                    st.image(listing["photo_url"], caption="Current photo")
-                elif listing.get("photo_data"):
-                    st.image(listing["photo_data"], caption="Current photo")
+                photo_url = listing["photo_url"]
+                photo_data = listing["photo_data"]
+                if photo_url:
+                    st.image(photo_url, caption="Current photo")
+                elif photo_data:
+                    st.image(photo_data, caption="Current photo")
                 uploaded_photo = st.file_uploader(
                     "Replace photo (optional)",
                     type=["jpg", "jpeg", "png"],
@@ -750,12 +768,24 @@ def main():
             if user is None:
                 st.error("The logged-in account could not be found.")
             else:
+                pending_request_count = get_pending_incoming_rental_request_count(
+                    connection, user["id"]
+                )
+                requests_label = "Requests"
+                if pending_request_count:
+                    requests_label += " ①"
                 unread_count = get_unread_message_count(connection, user["id"])
                 chats_label = "Chats"
                 if unread_count:
                     chats_label += " ①"
                 find_tab, list_tab, my_listings_tab, requests_tab, chats_tab = st.tabs(
-                    ["Find storage", "List a space", "My listings", "Requests", chats_label]
+                    [
+                        "Find storage",
+                        "List a space",
+                        "My listings",
+                        requests_label,
+                        chats_label,
+                    ]
                 )
                 with find_tab:
                     show_listings(connection)

@@ -5,6 +5,7 @@ from logic import (
     create_listing,
     create_rental_request,
     get_messages,
+    get_pending_incoming_rental_request_count,
     get_unread_message_count,
     mark_messages_read,
     register_user,
@@ -323,3 +324,20 @@ def test_unread_count_tracks_messages_from_other_participant(connection):
 
     mark_messages_read(connection, request_id, owner_id)
     assert get_unread_message_count(connection, owner_id) == 0
+
+
+@pytest.mark.parametrize("status", ["accepted", "rejected"])
+def test_pending_incoming_request_count_excludes_sent_and_resolved_requests(
+    connection, status
+):
+    owner_id, requester_id, listing_id = make_listing(connection)
+    request_id = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+
+    assert get_pending_incoming_rental_request_count(connection, owner_id) == 1
+    assert get_pending_incoming_rental_request_count(connection, requester_id) == 0
+
+    update_rental_request_status(connection, request_id, owner_id, status)
+
+    assert get_pending_incoming_rental_request_count(connection, owner_id) == 0

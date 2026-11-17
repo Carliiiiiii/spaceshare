@@ -324,5 +324,10 @@ def get_unread_message_count(connection, user_id):
     return db.get_unread_message_count(connection, user_id)
 
 
+def get_pending_incoming_rental_request_count(connection, user_id):
+    """Count open requests received for the user's own listings."""
+    return db.get_pending_incoming_rental_request_count(connection, user_id)
+
+
 def mark_messages_read(connection, request_id, user_id):
     db.mark_messages_read(connection, request_id, user_id)

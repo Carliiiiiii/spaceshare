@@ -347,7 +347,8 @@ def get_listings(
     query = """
         SELECT id, title, city, description, size_sqm,
                price_per_month_eur, available_from, available_until,
-               photo_data, photo_mime_type, public_latitude, public_longitude,
+               photo_data, photo_mime_type, NULL AS photo_url,
+               public_latitude, public_longitude,
                minimum_rental_days
         FROM listings
     """
@@ -384,7 +385,8 @@ def get_listings_by_owner(connection: sqlite3.Connection, owner_id: int) -> list
         """
         SELECT id, title, city, description, size_sqm,
                price_per_month_eur, available_from, available_until,
-               photo_data, photo_mime_type, public_latitude, public_longitude,
+               photo_data, photo_mime_type, NULL AS photo_url,
+               public_latitude, public_longitude,
                minimum_rental_days
         FROM listings
         WHERE owner_id = ?
@@ -670,6 +672,39 @@ def get_rental_requests_for_user(connection, user_id):
            ORDER BY requests.id DESC""",
         (user_id, user_id),
     ).fetchall()
+
+
+def get_pending_incoming_rental_request_count(connection, user_id):
+    """Count pending requests received for listings owned by a user."""
+    if isinstance(connection, SupabaseConnection):
+        listings = (
+            connection.client.table("listings")
+            .select("id")
+            .eq("owner_id", user_id)
+            .execute()
+            .data
+            or []
+        )
+        owned_ids = [listing["id"] for listing in listings]
+        if not owned_ids:
+            return 0
+        requests = (
+            connection.client.table("rental_requests")
+            .select("id")
+            .in_("listing_id", owned_ids)
+            .eq("status", "pending")
+            .execute()
+            .data
+            or []
+        )
+        return len(requests)
+    return connection.execute(
+        """SELECT COUNT(*)
+           FROM rental_requests AS requests
+           JOIN listings ON listings.id = requests.listing_id
+           WHERE listings.owner_id = ? AND requests.status = 'pending'""",
+        (user_id,),
+    ).fetchone()[0]
 
 
 def update_rental_request_status(connection, request_id, owner_id, status):
