@@ -7,7 +7,9 @@ from pathlib import Path
 import folium
 import streamlit as st
 from streamlit_folium import st_folium
+from extra_streamlit_components import CookieManager
 
+from auth_session import COOKIE_NAME, SESSION_TTL_SECONDS, create_session, read_session
 import db
 from supabase_backend import create_supabase_client
 from logic import (
@@ -62,6 +64,34 @@ def get_connection():
     return db.connect(DATABASE_PATH)
 
 
+def get_cookie_manager():
+    """Return the browser-cookie component used for the signed session token."""
+    return CookieManager(key="spaceshare_session_cookie")
+
+
+def restore_logged_in_user(connection, cookie_manager):
+    """Restore a user from a valid signed cookie, or clear an expired one."""
+    current_email = st.session_state.get("user_email")
+    if current_email:
+        return current_email
+    # CookieManager receives browser cookies through a component iframe. On a
+    # fresh Streamlit run, give that iframe one rerun to return its first value.
+    if not st.session_state.get("session_cookie_initialized"):
+        st.session_state["session_cookie_initialized"] = True
+        st.rerun()
+    token = cookie_manager.get(COOKIE_NAME)
+    email = read_session(token, st.secrets)
+    if email is None:
+        if token:
+            cookie_manager.delete(COOKIE_NAME)
+        return None
+    if db.get_user_by_email(connection, email) is None:
+        cookie_manager.delete(COOKIE_NAME)
+        return None
+    st.session_state["user_email"] = email
+    return email
+
+
 def show_brand_header():
     """Show the responsive SpaceShare brand header."""
     st.markdown(
@@ -103,7 +133,7 @@ def show_registration(connection):
             st.success("Account created. You can now log in.")
 
 
-def show_login(connection):
+def show_login(connection, cookie_manager):
     st.subheader("Log in")
     with st.form("login_form"):
         email = st.text_input("Email address", key="login_email")
@@ -117,8 +147,18 @@ def show_login(connection):
             st.error(str(error))
         else:
             if valid_password:
-                st.session_state["user_email"] = email.strip().lower()
-                st.rerun()
+                normalized_email = email.strip().lower()
+                st.session_state["user_email"] = normalized_email
+                cookie_manager.set(
+                    COOKIE_NAME,
+                    create_session(normalized_email, st.secrets),
+                    key="set_session_cookie",
+                    max_age=SESSION_TTL_SECONDS,
+                    secure=False,
+                    same_site="lax",
+                )
+                st.success("Logged in. Refresh the page to continue.")
+                st.stop()
             else:
                 st.error("Invalid email or password.")
 
@@ -880,8 +920,9 @@ def main():
     show_brand_header()
 
     connection = get_connection()
+    cookie_manager = get_cookie_manager()
     try:
-        user_email = st.session_state.get("user_email")
+        user_email = restore_logged_in_user(connection, cookie_manager)
 
         if user_email:
             st.success(f"Welcome, {user_email}!")
@@ -919,6 +960,7 @@ def main():
                 with chats_tab:
                     show_chats(connection, user["id"])
             if st.button("Log out"):
+                cookie_manager.delete(COOKIE_NAME)
                 del st.session_state["user_email"]
                 st.rerun()
             return
@@ -933,7 +975,7 @@ def main():
                 with register_tab:
                     show_registration(connection)
                 with login_tab:
-                    show_login(connection)
+                    show_login(connection, cookie_manager)
             if listings:
                 show_listing_map(listings)
     finally:
