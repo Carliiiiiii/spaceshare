@@ -734,17 +734,25 @@ def show_listing_contact_actions(connection, listing):
         earliest_request_end = earliest_request_start + timedelta(
             days=int(listing["minimum_rental_days"])
         )
+        request_start_key = f"request_start_{listing['id']}"
+        request_end_key = f"request_end_{listing['id']}"
+        stored_start = st.session_state.get(request_start_key)
+        stored_end = st.session_state.get(request_end_key)
+        if stored_start is not None and stored_start < earliest_request_start:
+            st.session_state.pop(request_start_key, None)
+        if stored_end is not None and stored_end < earliest_request_end:
+            st.session_state.pop(request_end_key, None)
         request_start = st.date_input(
             "Rental start date",
             value=earliest_request_start,
             min_value=earliest_request_start,
-            key=f"request_start_{listing['id']}",
+            key=request_start_key,
         )
         request_end = st.date_input(
             "Rental end date",
             value=earliest_request_end,
             min_value=earliest_request_end,
-            key=f"request_end_{listing['id']}",
+            key=request_end_key,
         )
         request_submitted = st.form_submit_button("Send rental request")
 
