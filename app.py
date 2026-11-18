@@ -249,7 +249,9 @@ def _public_listing_locations(listings):
     return locations
 
 
-def show_listing_map(listings):
+def show_listing_map(
+    listings, *, map_key="public_listing_map", is_detail_view=False
+):
     """Render the public, filtered listings on a map beside the list."""
     st.markdown("#### Map")
     locations = _public_listing_locations(listings)
@@ -301,16 +303,19 @@ def show_listing_map(listings):
 
     st_folium(
         listing_map,
-        key="public_listing_map",
+        key=map_key,
         height=580,
         use_container_width=True,
         returned_objects=[],
     )
-    st.caption(
-        "Map pins are approximate public locations, not exact addresses. "
-        f"{len(locations)} matching listing"
-        f"{'s' if len(locations) != 1 else ''} shown on the map."
-    )
+    if is_detail_view:
+        st.caption("This is an approximate public location, not an exact address.")
+    else:
+        st.caption(
+            "Map pins are approximate public locations, not exact addresses. "
+            f"{len(locations)} matching listing"
+            f"{'s' if len(locations) != 1 else ''} shown on the map."
+        )
 
 
 def show_listing_form(connection, user_email):
@@ -382,6 +387,15 @@ def show_listing_form(connection, user_email):
 
 
 def show_listings(connection, include_map=True):
+    selected_listing_id = st.session_state.get("selected_listing_id")
+    if selected_listing_id is not None:
+        selected_listing = db.get_listing_by_id(connection, selected_listing_id)
+        if selected_listing is not None:
+            show_listing_detail(connection, selected_listing)
+            return []
+        st.session_state.pop("selected_listing_id", None)
+        st.warning("This listing is no longer available.")
+
     st.subheader("Available storage listings")
     filter_columns = st.columns(5)
     with filter_columns[0]:
@@ -459,15 +473,14 @@ def show_listings(connection, include_map=True):
 
     st.markdown("#### Listings")
     for listing in listings:
-        show_listing_card(connection, listing)
+        show_listing_card(listing)
     if include_map:
-        st.markdown("#### Map")
         show_listing_map(listings)
     return listings
 
 
-def show_listing_card(connection, listing):
-    """Render one public listing card in the list half of the browse view."""
+def show_listing_card(listing):
+    """Render one compact listing card for the browse view."""
     photo_url = listing["photo_url"]
     photo_data = listing["photo_data"]
     with st.container(border=True):
@@ -487,7 +500,13 @@ def show_listing_card(connection, listing):
                 unsafe_allow_html=True,
             )
             st.markdown(f"**{listing['city']}**")
-            st.write(listing["description"])
+            description = str(listing["description"]).strip()
+            summary = (
+                description
+                if len(description) <= 160
+                else f"{description[:157].rstrip()}…"
+            )
+            st.write(summary)
             st.markdown(
                 f"<div class='listing-price'>€{listing['price_per_month_eur']:.2f} / month</div>",
                 unsafe_allow_html=True,
@@ -500,73 +519,120 @@ def show_listing_card(connection, listing):
                 unsafe_allow_html=True,
             )
 
-        if st.session_state.get("user_email"):
-            user = db.get_user_by_email(
-                connection, st.session_state["user_email"]
-            )
-            if user is None:
-                st.error("The logged-in account could not be found.")
-                return
+        if st.button("View details", key=f"listing_details_{listing['id']}"):
+            st.session_state["selected_listing_id"] = listing["id"]
+            st.rerun()
 
-            if db.is_listing_owner(connection, listing["id"], user["id"]):
-                st.caption("This is your listing.")
-                return
 
-            question_form_key = f"listing_question_open_{listing['id']}"
-            if st.button("Chat about this listing", key=f"chat_listing_{listing['id']}"):
-                st.session_state[question_form_key] = True
+def show_listing_detail(connection, listing):
+    """Render the complete listing information and its contact actions."""
+    if st.button("← Back to listings", key="back_to_listing_results"):
+        st.session_state.pop("selected_listing_id", None)
+        st.rerun()
 
-            if st.session_state.get(question_form_key):
-                with st.form(f"question_listing_{listing['id']}"):
-                    question_text = st.text_area(
-                        "Ask the listing owner a question",
-                        max_chars=1000,
-                        key=f"listing_question_text_{listing['id']}",
-                    )
-                    question_submitted = st.form_submit_button("Send question")
-
-                if question_submitted:
-                    try:
-                        send_listing_question(
-                            connection,
-                            listing["id"],
-                            user["id"],
-                            question_text,
-                        )
-                    except (ValueError, PermissionError) as error:
-                        st.error(str(error))
-                    else:
-                        st.session_state[question_form_key] = False
-                        st.success("Question sent. Continue the conversation in Chats.")
-
-            with st.form(f"request_listing_{listing['id']}"):
-                request_start = st.date_input(
-                    "Rental start date",
-                    key=f"request_start_{listing['id']}",
-                )
-                request_end = st.date_input(
-                    "Rental end date",
-                    key=f"request_end_{listing['id']}",
-                )
-                request_submitted = st.form_submit_button(
-                    "Send rental request"
-                )
-
-            if request_submitted:
-                try:
-                    create_rental_request(
-                        connection,
-                        listing["id"],
-                        user["id"],
-                        request_start.isoformat(),
-                        request_end.isoformat(),
-                    )
-                except (ValueError, PermissionError) as error:
-                    st.error(str(error))
-                else:
-                    st.success("Rental request sent.")
+    st.subheader(listing["title"])
+    photo_url = listing["photo_url"]
+    photo_data = listing["photo_data"]
+    media_column, details_column = st.columns((1, 2), gap="large")
+    with media_column:
+        if photo_url:
+            st.image(photo_url, caption=listing["title"])
+        elif photo_data:
+            st.image(photo_data, caption=listing["title"])
         else:
-            st.caption("Log in to ask a question or send a rental request.")
+            st.info("No photo available.")
+    with details_column:
+        st.markdown(f"**City:** {listing['city']}")
+        st.markdown(
+            f"<div class='listing-price'>€{listing['price_per_month_eur']:.2f} / month</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div class='listing-meta'><b>{listing['size_sqm']} m²</b><br>"
+            f"Minimum stay: {listing['minimum_rental_days']} days</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("#### Description")
+    st.write(listing["description"])
+    st.markdown("#### Availability")
+    st.write(f"Available from: {listing['available_from']}")
+    st.write(f"Available until: {listing['available_until'] or 'Unlimited'}")
+    show_listing_map(
+        [listing],
+        map_key=f"listing_detail_map_{listing['id']}",
+        is_detail_view=True,
+    )
+    show_listing_contact_actions(connection, listing)
+
+
+def show_listing_contact_actions(connection, listing):
+    """Show chat and rental-request controls for one non-owner visitor."""
+    st.markdown("#### Contact and request")
+    if not st.session_state.get("user_email"):
+        st.caption("Log in to ask a question or send a rental request.")
+        return
+
+    user = db.get_user_by_email(connection, st.session_state["user_email"])
+    if user is None:
+        st.error("The logged-in account could not be found.")
+        return
+
+    if db.is_listing_owner(connection, listing["id"], user["id"]):
+        st.caption("This is your listing. You can edit it in My listings.")
+        return
+
+    question_form_key = f"listing_question_open_{listing['id']}"
+    if st.button("Chat about this listing", key=f"chat_listing_{listing['id']}"):
+        st.session_state[question_form_key] = True
+
+    if st.session_state.get(question_form_key):
+        with st.form(f"question_listing_{listing['id']}"):
+            question_text = st.text_area(
+                "Ask the listing owner a question",
+                max_chars=1000,
+                key=f"listing_question_text_{listing['id']}",
+            )
+            question_submitted = st.form_submit_button("Send question")
+
+        if question_submitted:
+            try:
+                send_listing_question(
+                    connection,
+                    listing["id"],
+                    user["id"],
+                    question_text,
+                )
+            except (ValueError, PermissionError) as error:
+                st.error(str(error))
+            else:
+                st.session_state[question_form_key] = False
+                st.success("Question sent. Continue the conversation in Chats.")
+
+    with st.form(f"request_listing_{listing['id']}"):
+        request_start = st.date_input(
+            "Rental start date",
+            key=f"request_start_{listing['id']}",
+        )
+        request_end = st.date_input(
+            "Rental end date",
+            key=f"request_end_{listing['id']}",
+        )
+        request_submitted = st.form_submit_button("Send rental request")
+
+    if request_submitted:
+        try:
+            create_rental_request(
+                connection,
+                listing["id"],
+                user["id"],
+                request_start.isoformat(),
+                request_end.isoformat(),
+            )
+        except (ValueError, PermissionError) as error:
+            st.error(str(error))
+        else:
+            st.success("Rental request sent.")
 
 
 def show_rental_requests(connection, user_id):

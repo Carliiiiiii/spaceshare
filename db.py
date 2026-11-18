@@ -396,6 +396,57 @@ def get_listings(
     return connection.execute(query, parameters).fetchall()
 
 
+def get_listing_by_id(connection, listing_id):
+    """Return one public listing by ID, or None when it no longer exists."""
+    if isinstance(connection, SupabaseConnection):
+        fields = (
+            "id,title,city,description,size_sqm,price_per_month_eur,"
+            "available_from,available_until,photo_mime_type,"
+            "photo_path,photo_url,public_latitude,public_longitude,"
+            "minimum_rental_days"
+        )
+        try:
+            response = (
+                connection.client.table("listings")
+                .select(fields)
+                .eq("id", listing_id)
+                .limit(1)
+                .execute()
+            )
+        except Exception:
+            response = (
+                connection.client.table("listings")
+                .select(
+                    "id,title,city,description,size_sqm,price_per_month_eur,"
+                    "available_from,available_until,minimum_rental_days"
+                )
+                .eq("id", listing_id)
+                .limit(1)
+                .execute()
+            )
+        if not response.data:
+            return None
+        listing = response.data[0]
+        listing.setdefault("photo_data", None)
+        listing.setdefault("photo_mime_type", None)
+        listing.setdefault("photo_url", None)
+        listing.setdefault("public_latitude", None)
+        listing.setdefault("public_longitude", None)
+        return listing
+    return connection.execute(
+        """
+        SELECT id, title, city, description, size_sqm,
+               price_per_month_eur, available_from, available_until,
+               photo_data, photo_mime_type, NULL AS photo_url,
+               public_latitude, public_longitude,
+               minimum_rental_days
+        FROM listings
+        WHERE id = ?
+        """,
+        (listing_id,),
+    ).fetchone()
+
+
 def get_listings_by_owner(connection: sqlite3.Connection, owner_id: int) -> list:
     """Return listings owned by one account."""
     if isinstance(connection, SupabaseConnection):
