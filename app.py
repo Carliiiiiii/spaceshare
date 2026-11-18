@@ -1,7 +1,7 @@
 """Streamlit interface for browsing and managing SpaceShare listings."""
 
 import html
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import folium
