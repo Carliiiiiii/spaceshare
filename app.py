@@ -107,7 +107,12 @@ def restore_logged_in_user(connection, cookie_manager):
     return email
 
 
-def show_brand_header(show_login_button=False, connection=None, cookie_manager=None):
+def show_brand_header(
+    show_login_button=False,
+    show_logout_button=False,
+    connection=None,
+    cookie_manager=None,
+):
     """Show the responsive SpaceShare brand header."""
     st.markdown(
         """
@@ -131,13 +136,15 @@ def show_brand_header(show_login_button=False, connection=None, cookie_manager=N
     logo_column, _, action_column = st.columns((3, 6, 1), gap="small")
     with logo_column:
         st.image(str(LOGO_PATH), width=260)
-    if show_login_button:
+    if show_login_button or show_logout_button:
         with action_column:
-            if st.button(
-                "Register & Log in",
-                type="primary",
-                key="header_login_button",
-            ):
+            header_label = "Register & Log in" if show_login_button else "Log out"
+            header_key = "header_login_button" if show_login_button else "header_logout_button"
+            if st.button(header_label, type="primary", key=header_key):
+                if show_logout_button:
+                    cookie_manager.delete(COOKIE_NAME)
+                    st.session_state.pop("user_email", None)
+                    st.rerun()
                 st.session_state["show_auth_panel"] = True
                 st.rerun()
 
@@ -1144,6 +1151,7 @@ def main():
         user_email = restore_logged_in_user(connection, cookie_manager)
         show_brand_header(
             show_login_button=not user_email,
+            show_logout_button=bool(user_email),
             connection=connection,
             cookie_manager=cookie_manager,
         )
@@ -1183,10 +1191,6 @@ def main():
                     show_rental_requests(connection, user["id"])
                 with chats_tab:
                     show_chats(connection, user["id"])
-            if st.button("Log out"):
-                cookie_manager.delete(COOKIE_NAME)
-                del st.session_state["user_email"]
-                st.rerun()
             return
 
         search_column, right_column = st.columns((4, 2), gap="large")
