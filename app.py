@@ -730,8 +730,11 @@ def show_listing_contact_actions(connection, listing):
                 st.success("Question sent. Continue the conversation in Chats.")
 
     with st.form(f"request_listing_{listing['id']}"):
+        earliest_request_start = date.fromisoformat(listing["available_from"])
         request_start = st.date_input(
             "Rental start date",
+            value=earliest_request_start,
+            min_value=earliest_request_start,
             key=f"request_start_{listing['id']}",
         )
         request_end = st.date_input(
