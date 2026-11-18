@@ -86,6 +86,8 @@ def get_cookie_manager():
 
 def restore_logged_in_user(connection, cookie_manager):
     """Restore a user from a valid signed cookie, or clear an expired one."""
+    if st.session_state.get("logged_out"):
+        return None
     current_email = st.session_state.get("user_email")
     if current_email:
         return current_email
@@ -144,6 +146,7 @@ def show_brand_header(
                 if show_logout_button:
                     cookie_manager.delete(COOKIE_NAME)
                     st.session_state.pop("user_email", None)
+                    st.session_state["logged_out"] = True
                     st.rerun()
                 st.session_state["show_auth_panel"] = True
                 st.rerun()
@@ -182,6 +185,7 @@ def show_login(connection, cookie_manager):
         else:
             if valid_password:
                 normalized_email = email.strip().lower()
+                st.session_state.pop("logged_out", None)
                 st.session_state["user_email"] = normalized_email
                 cookie_manager.set(
                     COOKIE_NAME,
