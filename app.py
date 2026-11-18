@@ -731,6 +731,9 @@ def show_listing_contact_actions(connection, listing):
 
     with st.form(f"request_listing_{listing['id']}"):
         earliest_request_start = date.fromisoformat(listing["available_from"])
+        earliest_request_end = earliest_request_start + timedelta(
+            days=int(listing["minimum_rental_days"])
+        )
         request_start = st.date_input(
             "Rental start date",
             value=earliest_request_start,
@@ -739,6 +742,8 @@ def show_listing_contact_actions(connection, listing):
         )
         request_end = st.date_input(
             "Rental end date",
+            value=earliest_request_end,
+            min_value=earliest_request_end,
             key=f"request_end_{listing['id']}",
         )
         request_submitted = st.form_submit_button("Send rental request")
