@@ -107,7 +107,7 @@ def restore_logged_in_user(connection, cookie_manager):
     return email
 
 
-def show_brand_header():
+def show_brand_header(show_login_button=False, connection=None, cookie_manager=None):
     """Show the responsive SpaceShare brand header."""
     st.markdown(
         """
@@ -123,11 +123,23 @@ def show_brand_header():
         .listing-price { color: #D95F1E; font-size: 1.2rem; font-weight: 700; }
         div.stButton > button[kind="primary"], div.stFormSubmitButton > button { background: #F77B32; color: white; border: 0; }
         div.stButton > button[kind="primary"]:hover, div.stFormSubmitButton > button:hover { background: #D95F1E; color: white; }
+        .spaceshare-header { align-items: center; }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    st.image(str(LOGO_PATH), width=260)
+    logo_column, _, action_column = st.columns((3, 6, 1), gap="small")
+    with logo_column:
+        st.image(str(LOGO_PATH), width=260)
+    if show_login_button:
+        with action_column:
+            if st.button(
+                "Register & Log in",
+                type="primary",
+                key="header_login_button",
+            ):
+                st.session_state["show_auth_panel"] = True
+                st.rerun()
 
 
 def show_registration(connection):
@@ -1108,13 +1120,17 @@ def show_my_listings(connection, owner_id):
 
 def main():
     st.set_page_config(page_title="SpaceShare", page_icon="📦")
-    show_brand_header()
 
     connection = get_connection()
     cookie_manager = get_cookie_manager()
     try:
         expire_pending_rental_requests(connection)
         user_email = restore_logged_in_user(connection, cookie_manager)
+        show_brand_header(
+            show_login_button=not user_email,
+            connection=connection,
+            cookie_manager=cookie_manager,
+        )
 
         if user_email:
             st.success(f"Welcome, {user_email}!")
@@ -1162,12 +1178,15 @@ def main():
             st.subheader("Find storage")
             listings = show_listings(connection, include_map=False)
         with right_column:
-            with st.expander("Register or log in"):
+            if st.session_state.get("show_auth_panel"):
                 register_tab, login_tab = st.tabs(["Register", "Log in"])
                 with register_tab:
                     show_registration(connection)
                 with login_tab:
                     show_login(connection, cookie_manager)
+                if st.button("Close", key="close_auth_panel"):
+                    st.session_state["show_auth_panel"] = False
+                    st.rerun()
             if listings:
                 show_listing_map(listings)
     finally:
