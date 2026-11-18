@@ -98,6 +98,38 @@ def test_authenticated_user_can_create_and_reopen_listing(tmp_path):
         second_connection.close()
 
 
+def test_get_listing_by_id_returns_only_the_requested_listing(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret")
+    first_listing_id = create_listing(
+        connection,
+        owner_id,
+        "Garage",
+        "Lisbon",
+        "Dry storage.",
+        12,
+        80,
+        "2026-12-01",
+        30,
+    )
+    create_listing(
+        connection,
+        owner_id,
+        "Basement",
+        "Porto",
+        "Secure storage.",
+        8,
+        50,
+        "2026-12-01",
+        30,
+    )
+
+    listing = db.get_listing_by_id(connection, first_listing_id)
+
+    assert listing["id"] == first_listing_id
+    assert listing["title"] == "Garage"
+    assert db.get_listing_by_id(connection, 99999) is None
+
+
 @pytest.mark.parametrize(
     "values",
     [
