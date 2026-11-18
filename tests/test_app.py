@@ -56,3 +56,13 @@ def test_listing_id_for_map_point_selects_only_one_matching_marker():
         [(garage, 38.72, -9.14), (basement, 38.72, -9.14)],
         {"lat": 38.72, "lng": -9.14},
     ) is None
+
+
+def test_rental_request_status_labels_show_confirmed_booking_and_deadline():
+    assert app._rental_request_status_label({"status": "accepted"}) == "Booking confirmed"
+    assert app._rental_request_status_label(
+        {
+            "status": "pending",
+            "expires_at": "2026-12-08T15:30:00+00:00",
+        }
+    ) == "Pending — response due 08 Dec 2026, 15:30 UTC"

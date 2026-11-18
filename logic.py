@@ -1,7 +1,7 @@
 """Validation and authentication rules for SpaceShare accounts."""
 
 import sqlite3
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from math import isfinite
 from typing import Optional
@@ -17,6 +17,7 @@ password_hasher = PasswordHasher()
 MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024
 MAX_MESSAGE_LENGTH = 1000
 PUBLIC_LOCATION_DECIMAL_PLACES = 2
+RENTAL_REQUEST_EXPIRY_DAYS = db.RENTAL_REQUEST_EXPIRY_DAYS
 
 
 def normalize_email(email: str) -> str:
@@ -287,12 +288,17 @@ def create_rental_request(connection, listing_id, requester_id, start_date, end_
         raise ValueError(
             "The requested period is shorter than the minimum rental duration."
         )
+    created_at = datetime.now(timezone.utc)
     return db.create_rental_request(
         connection,
         listing_id,
         requester_id,
         requested_start.isoformat(),
         requested_end.isoformat(),
+        created_at.isoformat(timespec="seconds"),
+        (created_at + timedelta(days=RENTAL_REQUEST_EXPIRY_DAYS)).isoformat(
+            timespec="seconds"
+        ),
     )
 
 
@@ -300,6 +306,18 @@ def update_rental_request_status(connection, request_id, owner_id, status):
     if status not in {"accepted", "rejected"}:
         raise ValueError("Invalid rental request status.")
     db.update_rental_request_status(connection, request_id, owner_id, status)
+
+
+def cancel_rental_request(connection, request_id, requester_id):
+    """Let a requester withdraw an unanswered rental request."""
+    expire_pending_rental_requests(connection)
+    db.cancel_rental_request(connection, request_id, requester_id)
+
+
+def expire_pending_rental_requests(connection):
+    """Expire unanswered requests seven days after they were created."""
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return db.expire_pending_rental_requests(connection, now)
 
 
 def send_message(connection, request_id, sender_id, message):

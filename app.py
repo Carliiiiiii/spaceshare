@@ -12,9 +12,11 @@ import db
 from supabase_backend import create_supabase_client
 from logic import (
     PUBLIC_LOCATION_DECIMAL_PLACES,
+    cancel_rental_request,
     create_rental_request,
     create_listing,
     delete_listing,
+    expire_pending_rental_requests,
     get_listing_conversation_messages,
     get_listing_conversations,
     get_messages,
@@ -43,6 +45,12 @@ LISTING_SORT_OPTIONS = (
     "Size: largest first",
     "Size: smallest first",
 )
+RENTAL_REQUEST_STATUS_LABELS = {
+    "accepted": "Booking confirmed",
+    "cancelled": "Cancelled by requester",
+    "expired": "Expired",
+    "rejected": "Rejected",
+}
 
 
 def get_connection():
@@ -264,6 +272,21 @@ def _listing_id_for_map_point(locations, clicked_point):
         and abs(longitude - clicked_longitude) < 0.000001
     ]
     return matches[0] if len(matches) == 1 else None
+
+
+def _rental_request_status_label(request):
+    """Return a human-readable status, including the response deadline."""
+    if request["status"] != "pending":
+        return RENTAL_REQUEST_STATUS_LABELS.get(
+            request["status"], request["status"].title()
+        )
+    try:
+        deadline = datetime.fromisoformat(
+            request["expires_at"].replace("Z", "+00:00")
+        )
+    except (AttributeError, ValueError):
+        return "Pending"
+    return f"Pending — response due {deadline.strftime('%d %b %Y, %H:%M UTC')}"
 
 
 def show_listing_map(
@@ -677,7 +700,7 @@ def show_listing_contact_actions(connection, listing):
         except (ValueError, PermissionError) as error:
             st.error(str(error))
         else:
-            st.success("Rental request sent.")
+            st.success("Rental request sent. It expires in 7 days unless answered.")
 
 
 def show_rental_requests(connection, user_id):
@@ -696,8 +719,16 @@ def show_rental_requests(connection, user_id):
     for request in sent_requests:
         st.write(
             f"**{request['title']}** — {request['start_date']} to "
-            f"{request['end_date']} — **Status: {request['status']}**"
+            f"{request['end_date']} — **{_rental_request_status_label(request)}**"
         )
+        if request["status"] == "pending":
+            if st.button("Cancel request", key=f"cancel_request_{request['id']}"):
+                try:
+                    cancel_rental_request(connection, request["id"], user_id)
+                except PermissionError as error:
+                    st.error(str(error))
+                else:
+                    st.rerun()
 
     st.markdown("#### Requests for my listings")
     if not incoming_requests:
@@ -705,7 +736,7 @@ def show_rental_requests(connection, user_id):
     for request in incoming_requests:
         st.write(
             f"**{request['title']}** — {request['start_date']} to "
-            f"{request['end_date']} — **Status: {request['status']}**"
+            f"{request['end_date']} — **{_rental_request_status_label(request)}**"
         )
         if request["owner_id"] == user_id and request["status"] == "pending":
             columns = st.columns(2)
@@ -761,7 +792,7 @@ def show_chats(connection, user_id):
             )
             st.markdown(
                 f"**{role}: {request['title']}** · "
-                f"Status: {request['status'].title()}"
+                f"Status: {_rental_request_status_label(request)}"
             )
             show_request_chat(connection, user_id, request)
 
@@ -1041,6 +1072,7 @@ def main():
 
     connection = get_connection()
     try:
+        expire_pending_rental_requests(connection)
         user_email = st.session_state.get("user_email")
 
         if user_email:
