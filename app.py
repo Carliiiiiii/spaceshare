@@ -36,6 +36,13 @@ from logic import (
 DATABASE_PATH = Path("spaceshare.sqlite3")
 LOGO_PATH = Path(__file__).parent / "assets" / "spaceshare-logo.svg"
 DEFAULT_MAP_CENTER = (38.7223, -9.1393)
+LISTING_SORT_OPTIONS = (
+    "Newest",
+    "Price: low to high",
+    "Price: high to low",
+    "Size: largest first",
+    "Size: smallest first",
+)
 
 
 def get_connection():
@@ -209,8 +216,62 @@ def _public_listing_locations(listings):
     return locations
 
 
+def _sort_listings(listings, sort_option):
+    """Return listings in the selected browse order."""
+    if sort_option == "Price: low to high":
+        return sorted(
+            listings,
+            key=lambda listing: (
+                float(listing["price_per_month_eur"]),
+                -int(listing["id"]),
+            ),
+        )
+    if sort_option == "Price: high to low":
+        return sorted(
+            listings,
+            key=lambda listing: (
+                -float(listing["price_per_month_eur"]),
+                -int(listing["id"]),
+            ),
+        )
+    if sort_option == "Size: largest first":
+        return sorted(
+            listings,
+            key=lambda listing: (-float(listing["size_sqm"]), -int(listing["id"])),
+        )
+    if sort_option == "Size: smallest first":
+        return sorted(
+            listings,
+            key=lambda listing: (float(listing["size_sqm"]), -int(listing["id"])),
+        )
+    return sorted(listings, key=lambda listing: int(listing["id"]), reverse=True)
+
+
+def _listing_id_for_map_point(locations, clicked_point):
+    """Return a listing ID for one uniquely clicked public map point."""
+    if not isinstance(clicked_point, dict):
+        return None
+    try:
+        clicked_latitude = float(clicked_point["lat"])
+        clicked_longitude = float(clicked_point["lng"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    matches = [
+        listing["id"]
+        for listing, latitude, longitude in locations
+        if abs(latitude - clicked_latitude) < 0.000001
+        and abs(longitude - clicked_longitude) < 0.000001
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def show_listing_map(
-    listings, *, map_key="public_listing_map", is_detail_view=False
+    listings,
+    *,
+    map_key="public_listing_map",
+    is_detail_view=False,
+    interactive=False,
 ):
     """Render the public, filtered listings on a map beside the list."""
     st.markdown("#### Map")
@@ -261,13 +322,13 @@ def show_listing_map(
             padding=(30, 30),
         )
 
-    st_folium(
+    map_state = st_folium(
         listing_map,
         key=map_key,
         height=580,
         use_container_width=True,
-        returned_objects=[],
-    )
+        returned_objects=["last_object_clicked"] if interactive else [],
+    ) or {}
     if is_detail_view:
         st.caption("This is an approximate public location, not an exact address.")
     else:
@@ -276,6 +337,14 @@ def show_listing_map(
             f"{len(locations)} matching listing"
             f"{'s' if len(locations) != 1 else ''} shown on the map."
         )
+
+    if interactive:
+        selected_listing_id = _listing_id_for_map_point(
+            locations, map_state.get("last_object_clicked")
+        )
+        if selected_listing_id is not None:
+            st.session_state["selected_listing_id"] = selected_listing_id
+            st.rerun()
 
 
 def show_listing_form(connection, user_email):
@@ -346,7 +415,7 @@ def show_listing_form(connection, user_email):
             st.success("Listing created.")
 
 
-def show_listings(connection, include_map=True):
+def show_listings(connection):
     selected_listing_id = st.session_state.get("selected_listing_id")
     if selected_listing_id is not None:
         selected_listing = db.get_listing_by_id(connection, selected_listing_id)
@@ -429,13 +498,29 @@ def show_listings(connection, include_map=True):
         )
         return []
 
+    sort_column, view_column = st.columns((2, 2))
+    with sort_column:
+        sort_option = st.selectbox(
+            "Sort by",
+            LISTING_SORT_OPTIONS,
+            key="listing_sort_option",
+        )
+    with view_column:
+        view_mode = st.radio(
+            "Show as",
+            ("List", "Map"),
+            horizontal=True,
+            key="listing_view_mode",
+        )
+    listings = _sort_listings(listings, sort_option)
     st.caption(f"{len(listings)} listing{'s' if len(listings) != 1 else ''} found")
 
-    st.markdown("#### Listings")
-    for listing in listings:
-        show_listing_card(listing)
-    if include_map:
-        show_listing_map(listings)
+    if view_mode == "List":
+        st.markdown("#### Listings")
+        for listing in listings:
+            show_listing_card(listing)
+    else:
+        show_listing_map(listings, interactive=True)
     return listings
 
 
@@ -1001,7 +1086,7 @@ def main():
         search_column, right_column = st.columns((4, 2), gap="large")
         with search_column:
             st.subheader("Find storage")
-            listings = show_listings(connection, include_map=False)
+            show_listings(connection)
         with right_column:
             with st.expander("Register or log in"):
                 register_tab, login_tab = st.tabs(["Register", "Log in"])
@@ -1009,8 +1094,6 @@ def main():
                     show_registration(connection)
                 with login_tab:
                     show_login(connection)
-            if listings:
-                show_listing_map(listings)
     finally:
         connection.close()
 
