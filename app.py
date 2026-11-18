@@ -800,18 +800,24 @@ def show_my_listings(connection, owner_id):
                     st.image(photo_url, caption="Current photo")
                 elif photo_data:
                     st.image(photo_data, caption="Current photo")
-                uploaded_photo = st.file_uploader(
-                    "Replace photo (optional — drag and drop or browse; JPG/PNG, max 5 MB)",
-                    type=["jpg", "jpeg", "png"],
-                    key=f"photo_upload_{listing['id']}",
-                    help="Drag and drop one image here or choose it from your device.",
-                    max_upload_size=5,
-                    width="stretch",
+                edit_photo = st.checkbox(
+                    "Edit photo", key=f"photo_edit_{listing['id']}"
                 )
-                remove_photo = st.checkbox(
-                    "Remove current photo",
-                    key=f"photo_remove_{listing['id']}",
-                )
+                uploaded_photo = None
+                remove_photo = False
+                if edit_photo:
+                    uploaded_photo = st.file_uploader(
+                        "New photo (drag and drop or browse; JPG/PNG, max 5 MB)",
+                        type=["jpg", "jpeg", "png"],
+                        key=f"photo_upload_{listing['id']}",
+                        help="Drag and drop one image here or choose it from your device.",
+                        max_upload_size=5,
+                        width="stretch",
+                    )
+                    remove_photo = st.checkbox(
+                        "Remove photo instead",
+                        key=f"photo_remove_{listing['id']}",
+                    )
                 minimum_days = st.number_input(
                     "Minimum rental duration in days",
                     min_value=0,
@@ -821,42 +827,45 @@ def show_my_listings(connection, owner_id):
                 update_submitted = st.form_submit_button("Save changes")
 
             if update_submitted:
-                try:
-                    update_listing(
-                        connection,
-                        owner_id,
-                        listing["id"],
-                        title,
-                        city,
-                        description,
-                        size_sqm,
-                        price,
-                        available_from.isoformat(),
-                        minimum_days,
-                        available_until.isoformat() if available_until else None,
-                        (
-                            uploaded_photo.getvalue()
-                            if uploaded_photo
-                            else listing["photo_data"]
-                        )
-                        if not remove_photo
-                        else None,
-                        (
-                            uploaded_photo.type
-                            if uploaded_photo
-                            else listing["photo_mime_type"]
-                        )
-                        if not remove_photo
-                        else None,
-                        public_latitude=public_latitude,
-                        public_longitude=public_longitude,
-                        update_public_location=update_public_location,
-                    )
-                except ValueError as error:
-                    st.error(str(error))
+                if edit_photo and not uploaded_photo and not remove_photo:
+                    st.error("Choose a new photo or select Remove photo instead.")
                 else:
-                    st.success("Listing updated.")
-                    st.rerun()
+                    try:
+                        update_listing(
+                            connection,
+                            owner_id,
+                            listing["id"],
+                            title,
+                            city,
+                            description,
+                            size_sqm,
+                            price,
+                            available_from.isoformat(),
+                            minimum_days,
+                            available_until.isoformat() if available_until else None,
+                            (
+                                uploaded_photo.getvalue()
+                                if uploaded_photo
+                                else listing["photo_data"]
+                            )
+                            if not remove_photo
+                            else None,
+                            (
+                                uploaded_photo.type
+                                if uploaded_photo
+                                else listing["photo_mime_type"]
+                            )
+                            if not remove_photo
+                            else None,
+                            public_latitude=public_latitude,
+                            public_longitude=public_longitude,
+                            update_public_location=update_public_location,
+                        )
+                    except ValueError as error:
+                        st.error(str(error))
+                    else:
+                        st.success("Listing updated.")
+                        st.rerun()
 
             with st.form(f"delete_listing_{listing['id']}"):
                 confirmed = st.checkbox("I understand that this cannot be undone.")
