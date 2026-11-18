@@ -478,7 +478,7 @@ def show_listing_form(connection, user_email):
             st.success("Listing created.")
 
 
-def show_listings(connection):
+def show_listings(connection, *, include_map=True):
     selected_listing_id = st.session_state.get("selected_listing_id")
     if selected_listing_id is not None:
         selected_listing = db.get_listing_by_id(connection, selected_listing_id)
@@ -582,7 +582,7 @@ def show_listings(connection):
         st.markdown("#### Listings")
         for listing in listings:
             show_listing_card(listing)
-    else:
+    elif include_map:
         show_listing_map(listings, interactive=True)
     return listings
 
@@ -1160,7 +1160,7 @@ def main():
         search_column, right_column = st.columns((4, 2), gap="large")
         with search_column:
             st.subheader("Find storage")
-            show_listings(connection)
+            listings = show_listings(connection, include_map=False)
         with right_column:
             with st.expander("Register or log in"):
                 register_tab, login_tab = st.tabs(["Register", "Log in"])
