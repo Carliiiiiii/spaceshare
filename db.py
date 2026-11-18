@@ -2,10 +2,14 @@
 
 import sqlite3
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from supabase_backend import SupabaseConnection
+
+
+RENTAL_REQUEST_EXPIRY_DAYS = 7
 
 
 def connect(database_path: Path) -> sqlite3.Connection:
@@ -52,6 +56,8 @@ def connect(database_path: Path) -> sqlite3.Connection:
             start_date TEXT NOT NULL,
             end_date TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
             FOREIGN KEY (listing_id) REFERENCES listings (id),
             FOREIGN KEY (requester_id) REFERENCES users (id)
         )
@@ -133,6 +139,27 @@ def connect(database_path: Path) -> sqlite3.Connection:
         connection.execute("ALTER TABLE listings ADD COLUMN public_latitude REAL")
     if "public_longitude" not in listing_columns:
         connection.execute("ALTER TABLE listings ADD COLUMN public_longitude REAL")
+    rental_request_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(rental_requests)")
+    }
+    if "created_at" not in rental_request_columns:
+        connection.execute("ALTER TABLE rental_requests ADD COLUMN created_at TEXT")
+    if "expires_at" not in rental_request_columns:
+        connection.execute("ALTER TABLE rental_requests ADD COLUMN expires_at TEXT")
+    now = datetime.now(timezone.utc)
+    connection.execute(
+        "UPDATE rental_requests SET created_at = ? WHERE created_at IS NULL",
+        (now.isoformat(timespec="seconds"),),
+    )
+    connection.execute(
+        "UPDATE rental_requests SET expires_at = ? WHERE expires_at IS NULL",
+        (
+            (now + timedelta(days=RENTAL_REQUEST_EXPIRY_DAYS)).isoformat(
+                timespec="seconds"
+            ),
+        ),
+    )
     connection.commit()
     return connection
 
@@ -636,7 +663,15 @@ def delete_listing(
     connection.commit()
 
 
-def create_rental_request(connection, listing_id, requester_id, start_date, end_date):
+def create_rental_request(
+    connection,
+    listing_id,
+    requester_id,
+    start_date,
+    end_date,
+    created_at,
+    expires_at,
+):
     if isinstance(connection, SupabaseConnection):
         response = (
             connection.client.table("rental_requests")
@@ -646,6 +681,8 @@ def create_rental_request(connection, listing_id, requester_id, start_date, end_
                 "start_date": start_date,
                 "end_date": end_date,
                 "status": "pending",
+                "created_at": created_at,
+                "expires_at": expires_at,
             })
             .execute()
         )
@@ -653,11 +690,58 @@ def create_rental_request(connection, listing_id, requester_id, start_date, end_
             raise ValueError("The rental request could not be created.")
         return int(response.data[0]["id"])
     cursor = connection.execute(
-        "INSERT INTO rental_requests (listing_id, requester_id, start_date, end_date) VALUES (?, ?, ?, ?)",
-        (listing_id, requester_id, start_date, end_date),
+        """INSERT INTO rental_requests
+           (listing_id, requester_id, start_date, end_date, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (listing_id, requester_id, start_date, end_date, created_at, expires_at),
     )
     connection.commit()
     return int(cursor.lastrowid)
+
+
+def expire_pending_rental_requests(connection, now):
+    """Mark every pending request past its response deadline as expired."""
+    if isinstance(connection, SupabaseConnection):
+        response = (
+            connection.client.table("rental_requests")
+            .update({"status": "expired"})
+            .eq("status", "pending")
+            .lte("expires_at", now)
+            .execute()
+        )
+        return len(response.data or [])
+    cursor = connection.execute(
+        """UPDATE rental_requests SET status = 'expired'
+           WHERE status = 'pending' AND expires_at <= ?""",
+        (now,),
+    )
+    connection.commit()
+    return cursor.rowcount
+
+
+def cancel_rental_request(connection, request_id, requester_id):
+    """Let only the requester withdraw a still-pending rental request."""
+    if isinstance(connection, SupabaseConnection):
+        response = (
+            connection.client.table("rental_requests")
+            .update({"status": "cancelled"})
+            .eq("id", request_id)
+            .eq("requester_id", requester_id)
+            .eq("status", "pending")
+            .execute()
+        )
+        if not response.data:
+            raise PermissionError("You cannot cancel this rental request.")
+        return
+    cursor = connection.execute(
+        """UPDATE rental_requests SET status = 'cancelled'
+           WHERE id = ? AND requester_id = ? AND status = 'pending'""",
+        (request_id, requester_id),
+    )
+    if cursor.rowcount != 1:
+        connection.rollback()
+        raise PermissionError("You cannot cancel this rental request.")
+    connection.commit()
 
 
 def get_listing_for_request(connection, listing_id):
@@ -707,6 +791,9 @@ def has_accepted_rental_request_overlap(
 
 
 def get_rental_requests_for_user(connection, user_id):
+    expire_pending_rental_requests(
+        connection, datetime.now(timezone.utc).isoformat(timespec="seconds")
+    )
     if isinstance(connection, SupabaseConnection):
         listings = (
             connection.client.table("listings")
@@ -719,7 +806,10 @@ def get_rental_requests_for_user(connection, user_id):
         owned_ids = {row["id"] for row in listings}
         sent = (
             connection.client.table("rental_requests")
-            .select("id,listing_id,requester_id,start_date,end_date,status")
+            .select(
+                "id,listing_id,requester_id,start_date,end_date,status,"
+                "created_at,expires_at"
+            )
             .eq("requester_id", user_id)
             .execute()
             .data
@@ -729,7 +819,10 @@ def get_rental_requests_for_user(connection, user_id):
         if owned_ids:
             incoming = (
                 connection.client.table("rental_requests")
-                .select("id,listing_id,requester_id,start_date,end_date,status")
+                .select(
+                    "id,listing_id,requester_id,start_date,end_date,status,"
+                    "created_at,expires_at"
+                )
                 .in_("listing_id", list(owned_ids))
                 .execute()
                 .data
@@ -754,6 +847,7 @@ def get_rental_requests_for_user(connection, user_id):
     return connection.execute(
         """SELECT requests.id, requests.listing_id, requests.requester_id,
                   requests.start_date, requests.end_date, requests.status,
+                  requests.created_at, requests.expires_at,
                   listings.title, listings.owner_id
            FROM rental_requests AS requests
            JOIN listings ON listings.id = requests.listing_id
@@ -765,6 +859,9 @@ def get_rental_requests_for_user(connection, user_id):
 
 def get_pending_incoming_rental_request_count(connection, user_id):
     """Count pending requests received for listings owned by a user."""
+    expire_pending_rental_requests(
+        connection, datetime.now(timezone.utc).isoformat(timespec="seconds")
+    )
     if isinstance(connection, SupabaseConnection):
         listings = (
             connection.client.table("listings")
@@ -797,6 +894,9 @@ def get_pending_incoming_rental_request_count(connection, user_id):
 
 
 def update_rental_request_status(connection, request_id, owner_id, status):
+    expire_pending_rental_requests(
+        connection, datetime.now(timezone.utc).isoformat(timespec="seconds")
+    )
     if isinstance(connection, SupabaseConnection):
         request = (
             connection.client.table("rental_requests")

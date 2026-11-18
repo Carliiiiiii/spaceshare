@@ -1,9 +1,14 @@
 import pytest
+import sqlite3
+from datetime import datetime, timedelta
 
 import db
 from logic import (
+    RENTAL_REQUEST_EXPIRY_DAYS,
+    cancel_rental_request,
     create_listing,
     create_rental_request,
+    expire_pending_rental_requests,
     get_messages,
     get_pending_incoming_rental_request_count,
     get_unread_message_count,
@@ -77,6 +82,81 @@ def test_only_listing_owner_can_change_request_status(connection):
         db.get_rental_requests_for_user(connection, requester_id)[0]["status"]
         == "accepted"
     )
+
+
+def test_requester_can_cancel_only_a_pending_rental_request(connection):
+    owner_id, requester_id, listing_id = make_listing(connection)
+    request_id = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+
+    with pytest.raises(PermissionError):
+        cancel_rental_request(connection, request_id, owner_id)
+
+    cancel_rental_request(connection, request_id, requester_id)
+
+    request = db.get_rental_requests_for_user(connection, requester_id)[0]
+    assert request["status"] == "cancelled"
+
+    with pytest.raises(PermissionError):
+        cancel_rental_request(connection, request_id, requester_id)
+
+
+def test_pending_rental_request_expires_after_seven_days(connection):
+    owner_id, requester_id, listing_id = make_listing(connection)
+    request_id = create_rental_request(
+        connection, listing_id, requester_id, "2026-12-01", "2026-12-31"
+    )
+    request = db.get_rental_requests_for_user(connection, requester_id)[0]
+    created_at = datetime.fromisoformat(request["created_at"])
+    expires_at = datetime.fromisoformat(request["expires_at"])
+    assert expires_at - created_at == timedelta(days=RENTAL_REQUEST_EXPIRY_DAYS)
+
+    connection.execute(
+        "UPDATE rental_requests SET expires_at = ? WHERE id = ?",
+        ("2020-01-01T00:00:00+00:00", request_id),
+    )
+    connection.commit()
+
+    assert expire_pending_rental_requests(connection) == 1
+    expired_request = db.get_rental_requests_for_user(connection, owner_id)[0]
+    assert expired_request["status"] == "expired"
+
+    with pytest.raises(PermissionError):
+        update_rental_request_status(connection, request_id, owner_id, "accepted")
+
+
+def test_connect_adds_deadlines_to_existing_pending_requests(tmp_path):
+    database_path = tmp_path / "legacy_rental_requests.sqlite3"
+    legacy_connection = sqlite3.connect(database_path)
+    legacy_connection.execute(
+        """CREATE TABLE rental_requests (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               listing_id INTEGER NOT NULL,
+               requester_id INTEGER NOT NULL,
+               start_date TEXT NOT NULL,
+               end_date TEXT NOT NULL,
+               status TEXT NOT NULL DEFAULT 'pending'
+           )"""
+    )
+    legacy_connection.execute(
+        """INSERT INTO rental_requests
+           (listing_id, requester_id, start_date, end_date, status)
+           VALUES (1, 2, '2026-12-01', '2026-12-31', 'pending')"""
+    )
+    legacy_connection.commit()
+    legacy_connection.close()
+
+    connection = db.connect(database_path)
+    try:
+        request = connection.execute(
+            "SELECT created_at, expires_at FROM rental_requests"
+        ).fetchone()
+        created_at = datetime.fromisoformat(request["created_at"])
+        expires_at = datetime.fromisoformat(request["expires_at"])
+        assert expires_at - created_at == timedelta(days=RENTAL_REQUEST_EXPIRY_DAYS)
+    finally:
+        connection.close()
 
 
 def test_overlapping_request_cannot_be_accepted_and_remains_pending(connection):
