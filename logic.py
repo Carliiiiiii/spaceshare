@@ -60,6 +60,17 @@ def update_display_name(connection, user_id, display_name: str) -> None:
     db.update_user_display_name(connection, user_id, cleaned_name)
 
 
+def update_user_profile(connection, user_id, display_name, bio, request_verification, photo_data=None, photo_mime_type=None):
+    """Validate and update the public profile without self-verification."""
+    if not isinstance(display_name, str) or not display_name.strip() or len(display_name.strip()) > 80:
+        raise ValueError("Display name must be between 1 and 80 characters.")
+    if not isinstance(bio, str) or len(bio.strip()) > 300:
+        raise ValueError("Profile description must be 300 characters or fewer.")
+    photo_data, photo_mime_type = validate_photo(photo_data, photo_mime_type)
+    status = "pending" if request_verification else "unverified"
+    db.update_user_profile(connection, user_id, display_name.strip(), bio.strip(), status, photo_data, photo_mime_type)
+
+
 def verify_user_password(
     connection: sqlite3.Connection, email: str, password: str
 ) -> bool:

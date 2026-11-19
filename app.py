@@ -29,6 +29,7 @@ from logic import (
     mark_messages_read,
     register_user,
     update_display_name,
+    update_user_profile,
     send_listing_conversation_message,
     send_listing_question,
     send_message,
@@ -249,15 +250,25 @@ def show_registration(connection):
 
 
 def show_profile(connection, user):
-    """Allow the signed-in user to edit only their public display name."""
+    """Let a user manage their public trust profile."""
     st.subheader("My profile")
     current_name = user["display_name"] or "Storage user"
+    status = _row_value(user, "verification_status") or "unverified"
+    status_label = {"verified": "✓ Verified", "pending": "Verification requested", "unverified": "Not verified"}[status]
+    st.caption(f"Verification: {status_label}")
+    photo_url = _row_value(user, "profile_photo_url")
+    photo_data = _row_value(user, "profile_photo_data")
+    if photo_url or photo_data:
+        st.image(photo_url or photo_data, width=120)
     with st.form("profile_form"):
         display_name = st.text_input("Display name", value=current_name, max_chars=80)
+        bio = st.text_area("Short profile description", value=_row_value(user, "bio") or "", max_chars=300)
+        uploaded_photo = st.file_uploader("Profile photo (optional; JPG/PNG)", type=["jpg", "jpeg", "png"])
+        request_verification = st.checkbox("Request identity verification", value=status == "pending", disabled=status == "verified")
         submitted = st.form_submit_button("Save profile")
     if submitted:
         try:
-            update_display_name(connection, user["id"], display_name)
+            update_user_profile(connection, user["id"], display_name, bio, request_verification, uploaded_photo.getvalue() if uploaded_photo else None, uploaded_photo.type if uploaded_photo else None)
         except ValueError as error:
             st.error(str(error))
         else:
@@ -1056,6 +1067,18 @@ def show_listing_detail(connection, listing, user_id=None):
 
     with contact_column:
         with st.container(border=True):
+            owner_id = db._get_listing_owner_id(connection, listing["id"])
+            owner_profile = db.get_public_user_profile(connection, owner_id)
+            if owner_profile:
+                st.markdown("#### Hosted by")
+                owner_photo = _row_value(owner_profile, "profile_photo_url") or _row_value(owner_profile, "profile_photo_data")
+                if owner_photo:
+                    st.image(owner_photo, width=72)
+                st.write(_row_value(owner_profile, "display_name") or "Storage owner")
+                if _row_value(owner_profile, "verification_status") == "verified":
+                    st.caption("✓ Identity verified")
+                if _row_value(owner_profile, "bio"):
+                    st.caption(_row_value(owner_profile, "bio"))
             _show_favorite_button(
                 connection,
                 listing["id"],
