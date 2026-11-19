@@ -898,6 +898,31 @@ def update_rental_request_status(connection, request_id, owner_id, status):
         connection, datetime.now(timezone.utc).isoformat(timespec="seconds")
     )
     if isinstance(connection, SupabaseConnection):
+        if status == "accepted":
+            try:
+                connection.client.rpc(
+                    "accept_rental_request",
+                    {
+                        "p_request_id": request_id,
+                        "p_owner_id": owner_id,
+                    },
+                ).execute()
+            except Exception as error:
+                error_text = str(error)
+                if (
+                    "accepted_rental_requests_no_overlap" in error_text
+                    or "exclusion constraint" in error_text
+                ):
+                    raise ValueError(
+                        "This rental period overlaps an accepted request. "
+                        "The request remains pending."
+                    ) from error
+                if "You cannot change this rental request." in error_text:
+                    raise PermissionError(
+                        "You cannot change this rental request."
+                    ) from error
+                raise
+            return
         request = (
             connection.client.table("rental_requests")
             .select("id,listing_id,start_date,end_date,status")
