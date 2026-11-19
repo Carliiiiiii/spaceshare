@@ -1168,8 +1168,6 @@ def main():
                     show_registration(connection)
                 with login_tab:
                     show_login(connection, cookie_manager)
-            if listings:
-                show_listing_map(listings)
     finally:
         connection.close()
 
