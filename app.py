@@ -1067,9 +1067,9 @@ def show_listing_conversation_chat(connection, user_id, conversation):
             for message in messages:
                 is_current_user = message["sender_id"] == user_id
                 sender_role = "You" if is_current_user else (
-                    _chat_person_name(_row_value(conversation, "owner_name"), "Storage owner")
+                    _chat_person_name(_row_value(conversation, "participant_name"), "Storage seeker")
                     if conversation["owner_id"] == user_id
-                    else _chat_person_name(_row_value(conversation, "participant_name"), "Storage seeker")
+                    else _chat_person_name(_row_value(conversation, "owner_name"), "Storage owner")
                 )
                 try:
                     sent_at = datetime.fromisoformat(message["sent_at"])
