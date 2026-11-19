@@ -31,6 +31,7 @@ from logic import (
     send_listing_conversation_message,
     send_listing_question,
     send_message,
+    toggle_listing_favorite,
     update_listing,
     verify_user_password,
     update_rental_request_status,
@@ -546,6 +547,7 @@ def show_listing_map(
         )
         if selected_listing_id is not None:
             st.session_state["selected_listing_id"] = selected_listing_id
+            st.session_state["selected_listing_source"] = "browse"
             st.rerun()
 
 
@@ -617,14 +619,52 @@ def show_listing_form(connection, user_email):
             st.success("Listing created.")
 
 
-def show_listings(connection, *, include_map=True):
+def _favorite_listing_ids(connection, user_id):
+    """Return saved listing IDs for a signed-in user, or an empty set."""
+    return set(db.get_favorite_listing_ids(connection, user_id)) if user_id else set()
+
+
+def _show_favorite_button(
+    connection, listing_id, user_id, favorite_listing_ids, *, key_prefix
+):
+    """Render the heart control and persist its new saved state."""
+    is_favorite = listing_id in favorite_listing_ids
+    if user_id is None:
+        st.button(
+            "♡ Save",
+            key=f"{key_prefix}_save_listing_{listing_id}",
+            disabled=True,
+            help="Log in to save listings.",
+        )
+        return
+
+    label = "♥ Saved" if is_favorite else "♡ Save"
+    if st.button(label, key=f"{key_prefix}_save_listing_{listing_id}"):
+        try:
+            is_now_saved = toggle_listing_favorite(connection, user_id, listing_id)
+        except ValueError as error:
+            st.error(str(error))
+        else:
+            st.toast(
+                "Saved to your shortlist."
+                if is_now_saved
+                else "Removed from your shortlist."
+            )
+            st.rerun()
+
+
+def show_listings(connection, *, include_map=True, user_id=None):
     selected_listing_id = st.session_state.get("selected_listing_id")
-    if selected_listing_id is not None:
+    if (
+        selected_listing_id is not None
+        and st.session_state.get("selected_listing_source", "browse") == "browse"
+    ):
         selected_listing = db.get_listing_by_id(connection, selected_listing_id)
         if selected_listing is not None:
-            show_listing_detail(connection, selected_listing)
+            show_listing_detail(connection, selected_listing, user_id)
             return []
         st.session_state.pop("selected_listing_id", None)
+        st.session_state.pop("selected_listing_source", None)
         st.warning("This listing is no longer available.")
 
     st.markdown(
@@ -720,18 +760,32 @@ def show_listings(connection, *, include_map=True):
             key="listing_view_mode",
         )
     listings = _sort_listings(listings, sort_option)
+    favorite_listing_ids = _favorite_listing_ids(connection, user_id)
     st.caption(f"{len(listings)} listing{'s' if len(listings) != 1 else ''} found")
 
     if view_mode == "List":
         st.markdown("#### Listings")
         for listing in listings:
-            show_listing_card(listing)
+            show_listing_card(
+                connection,
+                listing,
+                user_id,
+                favorite_listing_ids,
+                key_prefix="browse",
+            )
     elif include_map:
         show_listing_map(listings, interactive=True)
     return listings
 
 
-def show_listing_card(listing):
+def show_listing_card(
+    connection,
+    listing,
+    user_id=None,
+    favorite_listing_ids=None,
+    *,
+    key_prefix,
+):
     """Render one compact listing card for the browse view."""
     photo_url = listing["photo_url"]
     photo_data = listing["photo_data"]
@@ -793,15 +847,29 @@ def show_listing_card(listing):
                 unsafe_allow_html=True,
             )
 
-        if st.button("View details", key=f"listing_details_{listing['id']}"):
-            st.session_state["selected_listing_id"] = listing["id"]
-            st.rerun()
+        details_column, favorite_column = st.columns((4, 1))
+        with details_column:
+            if st.button(
+                "View details", key=f"{key_prefix}_listing_details_{listing['id']}"
+            ):
+                st.session_state["selected_listing_id"] = listing["id"]
+                st.session_state["selected_listing_source"] = key_prefix
+                st.rerun()
+        with favorite_column:
+            _show_favorite_button(
+                connection,
+                listing["id"],
+                user_id,
+                favorite_listing_ids or set(),
+                key_prefix=key_prefix,
+            )
 
 
-def show_listing_detail(connection, listing):
+def show_listing_detail(connection, listing, user_id=None):
     """Render the complete listing information and its contact actions."""
     if st.button("← Back to listings", key="back_to_listing_results"):
         st.session_state.pop("selected_listing_id", None)
+        st.session_state.pop("selected_listing_source", None)
         st.rerun()
 
     information_column, contact_column = st.columns((2, 1), gap="large")
@@ -865,6 +933,13 @@ def show_listing_detail(connection, listing):
 
     with contact_column:
         with st.container(border=True):
+            _show_favorite_button(
+                connection,
+                listing["id"],
+                user_id,
+                _favorite_listing_ids(connection, user_id),
+                key_prefix="detail",
+            )
             show_listing_contact_actions(connection, listing)
 
     show_listing_map(
@@ -872,6 +947,51 @@ def show_listing_detail(connection, listing):
         map_key=f"listing_detail_map_{listing['id']}",
         is_detail_view=True,
     )
+
+
+def show_saved_listings(connection, user_id):
+    """Render the logged-in user's personal shortlist."""
+    selected_listing_id = st.session_state.get("selected_listing_id")
+    if (
+        selected_listing_id is not None
+        and st.session_state.get("selected_listing_source") == "saved"
+    ):
+        selected_listing = db.get_listing_by_id(connection, selected_listing_id)
+        if selected_listing is not None:
+            show_listing_detail(connection, selected_listing, user_id)
+            return
+        st.session_state.pop("selected_listing_id", None)
+        st.session_state.pop("selected_listing_source", None)
+        st.warning("This listing is no longer available.")
+
+    st.subheader("My saved listings")
+    saved_listing_ids = db.get_favorite_listing_ids(connection, user_id)
+    if not saved_listing_ids:
+        st.info("Save listings with the ♡ button to find them here later.")
+        return
+
+    saved_listings = [
+        listing
+        for listing_id in saved_listing_ids
+        if (listing := db.get_listing_by_id(connection, listing_id)) is not None
+    ]
+    if not saved_listings:
+        st.info("Your saved listings are no longer available.")
+        return
+
+    st.caption(
+        f"{len(saved_listings)} saved listing"
+        f"{'s' if len(saved_listings) != 1 else ''}"
+    )
+    favorite_listing_ids = set(saved_listing_ids)
+    for listing in saved_listings:
+        show_listing_card(
+            connection,
+            listing,
+            user_id,
+            favorite_listing_ids,
+            key_prefix="saved",
+        )
 
 
 def show_listing_contact_actions(connection, listing):
@@ -1372,22 +1492,25 @@ def main():
                 chats_label = "Chats"
                 if unread_count:
                     chats_label += " ①"
-                find_tab, list_tab, my_listings_tab, requests_tab, chats_tab, profile_tab = st.tabs(
+                find_tab, list_tab, my_listings_tab, saved_tab, requests_tab, chats_tab, profile_tab = st.tabs(
                     [
                         "Find storage",
                         "List a space",
                         "My listings",
+                        "♥ Saved",
                         requests_label,
                         chats_label,
                         "My profile",
                     ]
                 )
                 with find_tab:
-                    show_listings(connection)
+                    show_listings(connection, user_id=user["id"])
                 with list_tab:
                     show_listing_form(connection, user_email)
                 with my_listings_tab:
                     show_my_listings(connection, user["id"])
+                with saved_tab:
+                    show_saved_listings(connection, user["id"])
                 with requests_tab:
                     show_rental_requests(connection, user["id"])
                 with chats_tab:

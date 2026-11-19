@@ -127,6 +127,18 @@ def connect(database_path: Path) -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS listing_favorites (
+            user_id INTEGER NOT NULL,
+            listing_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, listing_id),
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+            FOREIGN KEY (listing_id) REFERENCES listings (id) ON DELETE CASCADE
+        )
+        """
+    )
     listing_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(listings)")
     }
@@ -496,6 +508,83 @@ def get_listing_by_id(connection, listing_id):
         """,
         (listing_id,),
     ).fetchone()
+
+
+def get_favorite_listing_ids(connection, user_id) -> list[int]:
+    """Return a user's saved listing IDs, most recently saved first."""
+    if isinstance(connection, SupabaseConnection):
+        response = (
+            connection.client.table("listing_favorites")
+            .select("listing_id")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return [int(row["listing_id"]) for row in (response.data or [])]
+    rows = connection.execute(
+        """SELECT listing_id FROM listing_favorites
+           WHERE user_id = ? ORDER BY created_at DESC, listing_id DESC""",
+        (user_id,),
+    ).fetchall()
+    return [int(row["listing_id"]) for row in rows]
+
+
+def toggle_listing_favorite(connection, user_id, listing_id, created_at) -> bool:
+    """Save a listing when absent, otherwise remove it; return its new state."""
+    if isinstance(connection, SupabaseConnection):
+        existing = (
+            connection.client.table("listing_favorites")
+            .select("listing_id")
+            .eq("user_id", user_id)
+            .eq("listing_id", listing_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if existing:
+            (
+                connection.client.table("listing_favorites")
+                .delete()
+                .eq("user_id", user_id)
+                .eq("listing_id", listing_id)
+                .execute()
+            )
+            return False
+        response = (
+            connection.client.table("listing_favorites")
+            .insert(
+                {
+                    "user_id": user_id,
+                    "listing_id": listing_id,
+                    "created_at": created_at,
+                }
+            )
+            .execute()
+        )
+        if not response.data:
+            raise ValueError("The listing could not be saved.")
+        return True
+
+    existing = connection.execute(
+        """SELECT 1 FROM listing_favorites
+           WHERE user_id = ? AND listing_id = ?""",
+        (user_id, listing_id),
+    ).fetchone()
+    if existing:
+        connection.execute(
+            "DELETE FROM listing_favorites WHERE user_id = ? AND listing_id = ?",
+            (user_id, listing_id),
+        )
+        connection.commit()
+        return False
+    connection.execute(
+        """INSERT INTO listing_favorites (user_id, listing_id, created_at)
+           VALUES (?, ?, ?)""",
+        (user_id, listing_id, created_at),
+    )
+    connection.commit()
+    return True
 
 
 def get_listings_by_owner(connection: sqlite3.Connection, owner_id: int) -> list:
