@@ -9,6 +9,7 @@ from logic import (
     create_listing,
     delete_listing,
     register_user,
+    update_display_name,
     update_listing,
     verify_user_password,
 )
@@ -29,6 +30,13 @@ def test_register_normalizes_email_and_does_not_store_plaintext(connection):
     assert user["email"] == "alice@example.com"
     assert user["password_hash"] != "correct horse"
     assert user["password_hash"].startswith("$argon2")
+
+
+def test_display_name_can_be_updated_without_exposing_email(connection):
+    user_id = register_user(connection, "user@example.com", "secret", "First name")
+    update_display_name(connection, user_id, "Updated name")
+    user = db.get_user_by_email(connection, "user@example.com")
+    assert user["display_name"] == "Updated name"
 
 
 @pytest.mark.parametrize(

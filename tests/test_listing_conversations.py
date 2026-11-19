@@ -60,6 +60,27 @@ def test_listing_question_creates_and_reuses_a_private_conversation(connection):
     ]
 
 
+def test_each_participant_sees_the_other_display_name_next_to_listing(connection):
+    owner_id = register_user(connection, "owner@example.com", "secret", "Alex Owner")
+    requester_id = register_user(
+        connection, "requester@example.com", "secret", "Sam Seeker"
+    )
+    listing_id = create_listing(
+        connection, owner_id, "Garage", "Lisbon", "Secure garage", 10, 50,
+        "2026-12-01", 30, "2027-01-31"
+    )
+    conversation_id = send_listing_question(connection, listing_id, requester_id, "Hello")
+
+    owner_view = get_listing_conversations(connection, owner_id)[0]
+    requester_view = get_listing_conversations(connection, requester_id)[0]
+    assert owner_view["title"] == "Garage"
+    assert owner_view["participant_name"] == "Sam Seeker"
+    assert requester_view["owner_name"] == "Alex Owner"
+    assert get_listing_conversation_messages(
+        connection, conversation_id, owner_id
+    )[0]["sender_id"] == requester_id
+
+
 def test_listing_owner_cannot_start_a_conversation_about_own_listing(connection):
     owner_id, _, listing_id = make_listing(connection)
 

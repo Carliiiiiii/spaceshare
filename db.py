@@ -22,7 +22,8 @@ def connect(database_path: Path) -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT NOT NULL UNIQUE,
-            password_hash TEXT NOT NULL
+            password_hash TEXT NOT NULL,
+            display_name TEXT
         )
         """
     )
@@ -129,6 +130,9 @@ def connect(database_path: Path) -> sqlite3.Connection:
     listing_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(listings)")
     }
+    user_columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
+    if "display_name" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
     if "available_until" not in listing_columns:
         connection.execute("ALTER TABLE listings ADD COLUMN available_until TEXT")
     if "photo_data" not in listing_columns:
@@ -164,13 +168,13 @@ def connect(database_path: Path) -> sqlite3.Connection:
     return connection
 
 
-def create_user(connection: sqlite3.Connection, email: str, password_hash: str) -> int:
+def create_user(connection: sqlite3.Connection, email: str, password_hash: str, display_name: str = "Storage user") -> int:
     """Store one account and return its id."""
     if isinstance(connection, SupabaseConnection):
         try:
             response = (
                 connection.client.table("users")
-                .insert({"email": email, "password_hash": password_hash})
+                .insert({"email": email, "password_hash": password_hash, "display_name": display_name})
                 .execute()
             )
         except Exception as error:
@@ -180,8 +184,8 @@ def create_user(connection: sqlite3.Connection, email: str, password_hash: str) 
         return int(response.data[0]["id"])
     try:
         cursor = connection.execute(
-            "INSERT INTO users (email, password_hash) VALUES (?, ?)",
-            (email, password_hash),
+            "INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)",
+            (email, password_hash, display_name),
         )
         connection.commit()
     except sqlite3.IntegrityError as error:
@@ -196,16 +200,36 @@ def get_user_by_email(
     if isinstance(connection, SupabaseConnection):
         response = (
             connection.client.table("users")
-            .select("id,email,password_hash")
+            .select("id,email,password_hash,display_name")
             .eq("email", email)
             .limit(1)
             .execute()
         )
         return response.data[0] if response.data else None
     return connection.execute(
-        "SELECT id, email, password_hash FROM users WHERE email = ?",
+        "SELECT id, email, password_hash, display_name FROM users WHERE email = ?",
         (email,),
     ).fetchone()
+
+
+def update_user_display_name(connection, user_id, display_name: str) -> None:
+    """Update a user's public display name without exposing their email."""
+    if isinstance(connection, SupabaseConnection):
+        response = (
+            connection.client.table("users")
+            .update({"display_name": display_name})
+            .eq("id", user_id)
+            .execute()
+        )
+        if not response.data:
+            raise ValueError("The display name could not be updated.")
+        return
+    cursor = connection.execute(
+        "UPDATE users SET display_name = ? WHERE id = ?", (display_name, user_id)
+    )
+    connection.commit()
+    if cursor.rowcount != 1:
+        raise ValueError("The display name could not be updated.")
 
 
 def create_listing(
@@ -842,15 +866,38 @@ def get_rental_requests_for_user(connection, user_id):
                     .data
                     or [{}]
                 )[0]
-            result.append({**request, "title": listing.get("title"), "owner_id": listing.get("owner_id")})
+            owner = (
+                connection.client.table("users")
+                .select("display_name")
+                .eq("id", listing.get("owner_id"))
+                .limit(1)
+                .execute()
+                .data
+                or [{}]
+            )[0].get("display_name")
+            requester = (
+                connection.client.table("users")
+                .select("display_name")
+                .eq("id", request.get("requester_id"))
+                .limit(1)
+                .execute()
+                .data
+                or [{}]
+            )[0].get("display_name")
+            result.append({**request, "title": listing.get("title"), "owner_id": listing.get("owner_id"),
+                           "owner_name": owner, "requester_name": requester})
         return sorted(result, key=lambda row: row["id"], reverse=True)
     return connection.execute(
         """SELECT requests.id, requests.listing_id, requests.requester_id,
                   requests.start_date, requests.end_date, requests.status,
                   requests.created_at, requests.expires_at,
-                  listings.title, listings.owner_id
+                  listings.title, listings.owner_id,
+                  owner.display_name AS owner_name,
+                  requester.display_name AS requester_name
            FROM rental_requests AS requests
            JOIN listings ON listings.id = requests.listing_id
+           JOIN users AS owner ON owner.id = listings.owner_id
+           JOIN users AS requester ON requester.id = requests.requester_id
            WHERE requests.requester_id = ? OR listings.owner_id = ?
            ORDER BY requests.id DESC""",
         (user_id, user_id),
@@ -1352,11 +1399,31 @@ def get_listing_conversations_for_user(connection, user_id):
                 if not listing_result:
                     continue
                 listing = listing_result[0]
+            participant = (
+                connection.client.table("users")
+                .select("display_name")
+                .eq("id", conversation["participant_id"])
+                .limit(1)
+                .execute()
+                .data
+                or [{}]
+            )[0].get("display_name")
+            owner = (
+                connection.client.table("users")
+                .select("display_name")
+                .eq("id", listing["owner_id"])
+                .limit(1)
+                .execute()
+                .data
+                or [{}]
+            )[0].get("display_name")
             result.append(
                 {
                     **conversation,
                     "title": listing["title"],
                     "owner_id": listing["owner_id"],
+                    "participant_name": participant,
+                    "owner_name": owner,
                 }
             )
         return sorted(
@@ -1370,9 +1437,13 @@ def get_listing_conversations_for_user(connection, user_id):
     return connection.execute(
         """SELECT conversations.id, conversations.listing_id,
                   conversations.participant_id, conversations.created_at,
-                  listings.title, listings.owner_id
+                  listings.title, listings.owner_id,
+                  participant.display_name AS participant_name,
+                  owner.display_name AS owner_name
            FROM listing_conversations AS conversations
            JOIN listings ON listings.id = conversations.listing_id
+           JOIN users AS participant ON participant.id = conversations.participant_id
+           JOIN users AS owner ON owner.id = listings.owner_id
            WHERE conversations.participant_id = ? OR listings.owner_id = ?
            ORDER BY conversations.created_at DESC, conversations.id DESC""",
         (user_id, user_id),

@@ -30,14 +30,34 @@ def normalize_email(email: str) -> str:
     return normalized_email
 
 
-def register_user(connection: sqlite3.Connection, email: str, password: str) -> int:
+def register_user(
+    connection: sqlite3.Connection,
+    email: str,
+    password: str,
+    display_name: str = "Storage user",
+) -> int:
     """Validate and register an account."""
     normalized_email = normalize_email(email)
     if not isinstance(password, str) or not password:
         raise ValueError("Password is required.")
+    if not isinstance(display_name, str) or not display_name.strip():
+        raise ValueError("Display name is required.")
+    display_name = display_name.strip()
+    if len(display_name) > 80:
+        raise ValueError("Display name must be 80 characters or fewer.")
 
     password_hash = password_hasher.hash(password)
-    return db.create_user(connection, normalized_email, password_hash)
+    return db.create_user(connection, normalized_email, password_hash, display_name)
+
+
+def update_display_name(connection, user_id, display_name: str) -> None:
+    """Validate and update the authenticated user's public display name."""
+    if not isinstance(display_name, str) or not display_name.strip():
+        raise ValueError("Display name is required.")
+    cleaned_name = display_name.strip()
+    if len(cleaned_name) > 80:
+        raise ValueError("Display name must be 80 characters or fewer.")
+    db.update_user_display_name(connection, user_id, cleaned_name)
 
 
 def verify_user_password(
