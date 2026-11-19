@@ -222,8 +222,8 @@ def show_brand_header(
 def show_registration(connection):
     st.subheader("Create an account")
     with st.form("registration_form"):
-        display_name = st.text_input("Display name", key="registration_display_name")
-        email = st.text_input("Email address", key="registration_email")
+        display_name = st.text_input("Name", key="registration_display_name")
+        email = st.text_input("E-mail address", key="registration_email")
         password = st.text_input(
             "Password", type="password", key="registration_password"
         )
@@ -268,6 +268,16 @@ def _row_value(row, key):
         return None
 
 
+def _format_date(value):
+    """Format stored ISO dates for people while keeping database values unchanged."""
+    if not value:
+        return "Unlimited"
+    try:
+        return date.fromisoformat(str(value)).strftime("%-d %B %Y")
+    except ValueError:
+        return str(value)
+
+
 def show_footer():
     """Show the shared, minimal application footer."""
     st.markdown(
@@ -279,7 +289,7 @@ def show_footer():
 def show_login(connection, cookie_manager):
     st.subheader("Log in")
     with st.form("login_form"):
-        email = st.text_input("Email address", key="login_email")
+        email = st.text_input("E-mail address", key="login_email")
         password = st.text_input("Password", type="password", key="login_password")
         submitted = st.form_submit_button("Log in")
 
@@ -772,7 +782,7 @@ def show_listing_card(listing):
                 <div class="detail-stat-grid">
                     <div class="detail-stat">
                         <div class="detail-label">Available</div>
-                        <strong>{listing['available_from']} – {listing['available_until'] or 'Unlimited'}</strong>
+                        <strong>{_format_date(listing['available_from'])} – {_format_date(listing['available_until'])}</strong>
                     </div>
                     <div class="detail-stat">
                         <div class="detail-label">Minimum stay</div>
@@ -840,11 +850,11 @@ def show_listing_detail(connection, listing):
                 <div class="availability-grid">
                     <div class="availability-box">
                         <div class="detail-label">Available from</div>
-                        <strong>{listing['available_from']}</strong>
+                        <strong>{_format_date(listing['available_from'])}</strong>
                     </div>
                     <div class="availability-box">
                         <div class="detail-label">Available until</div>
-                        <strong>{listing['available_until'] or 'Unlimited'}</strong>
+                        <strong>{_format_date(listing['available_until'])}</strong>
                     </div>
                 </div>
                 """,
@@ -964,8 +974,8 @@ def show_rental_requests(connection, user_id):
         st.info("You have not sent any rental requests.")
     for request in sent_requests:
         st.write(
-            f"**{request['title']}** — {request['start_date']} to "
-            f"{request['end_date']} — **{_rental_request_status_label(request)}**"
+            f"**{request['title']}** — {_format_date(request['start_date'])} to "
+            f"{_format_date(request['end_date'])} — **{_rental_request_status_label(request)}**"
         )
         if request["status"] == "pending":
             if st.button("Cancel request", key=f"cancel_request_{request['id']}"):
@@ -981,8 +991,8 @@ def show_rental_requests(connection, user_id):
         st.info("No one has requested your listings yet.")
     for request in incoming_requests:
         st.write(
-            f"**{request['title']}** — {request['start_date']} to "
-            f"{request['end_date']} — **{_rental_request_status_label(request)}**"
+            f"**{request['title']}** — {_format_date(request['start_date'])} to "
+            f"{_format_date(request['end_date'])} — **{_rental_request_status_label(request)}**"
         )
         if request["owner_id"] == user_id and request["status"] == "pending":
             columns = st.columns(2)
