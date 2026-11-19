@@ -915,6 +915,17 @@ def get_listing_for_request(connection, listing_id):
     ).fetchone()
 
 
+def get_confirmed_booking_periods(connection, listing_id):
+    """Return confirmed half-open booking periods for one listing."""
+    if isinstance(connection, SupabaseConnection):
+        response = connection.client.table("rental_requests").select("start_date,end_date").eq("listing_id", listing_id).eq("status", "accepted").execute()
+        return response.data or []
+    return connection.execute(
+        "SELECT start_date, end_date FROM rental_requests WHERE listing_id = ? AND status = 'accepted' ORDER BY start_date",
+        (listing_id,),
+    ).fetchall()
+
+
 def has_accepted_rental_request_overlap(
     connection: sqlite3.Connection,
     listing_id: int,
