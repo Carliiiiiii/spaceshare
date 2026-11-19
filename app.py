@@ -611,11 +611,9 @@ def show_listing_form(connection, user_email):
 
     if submitted:
         try:
-            description_with_features = description.strip()
-            if selected_features:
-                description_with_features += "\n\nFeatures: " + ", ".join(
-                    selected_features
-                )
+            description_with_features = _description_with_features(
+                description, selected_features
+            )
             create_listing(
                 connection,
                 user["id"],
@@ -678,6 +676,23 @@ def _filter_advanced_listings(
                 continue
         filtered.append(listing)
     return filtered
+
+
+def _listing_description_and_features(description):
+    """Split the app-managed feature suffix from a listing description."""
+    base_description, separator, saved_features = description.partition("\n\nFeatures:")
+    saved = {feature.strip() for feature in saved_features.split(",")} if separator else set()
+    return base_description, [feature for feature in SEARCH_FEATURES if feature in saved]
+
+
+def _description_with_features(description, selected_features):
+    """Store selected equipment in a predictable, searchable suffix."""
+    base_description, _ = _listing_description_and_features(description.strip())
+    return (
+        f"{base_description}\n\nFeatures: {', '.join(selected_features)}"
+        if selected_features
+        else base_description
+    )
 
 
 def _show_favorite_button(
@@ -1456,8 +1471,18 @@ def show_my_listings(connection, owner_id):
             with st.form(f"edit_listing_{listing['id']}"):
                 title = st.text_input("Title", value=listing["title"])
                 city = st.text_input("City", value=listing["city"])
+                description_value, saved_features = _listing_description_and_features(
+                    listing["description"]
+                )
                 description = st.text_area(
-                    "Description", value=listing["description"]
+                    "Description", value=description_value
+                )
+                selected_features = st.multiselect(
+                    "Equipment and access",
+                    tuple(SEARCH_FEATURES),
+                    default=saved_features,
+                    key=f"edit_listing_features_{listing['id']}",
+                    help="These details make your listing easier to find.",
                 )
                 size_sqm = st.number_input(
                     "Size in m²", min_value=0.0, value=float(listing["size_sqm"]), step=1.0
@@ -1522,7 +1547,7 @@ def show_my_listings(connection, owner_id):
                             listing["id"],
                             title,
                             city,
-                            description,
+                            _description_with_features(description, selected_features),
                             size_sqm,
                             price,
                             available_from.isoformat(),
