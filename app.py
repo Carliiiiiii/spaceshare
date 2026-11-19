@@ -2,6 +2,7 @@
 
 import html
 from datetime import date, datetime, timedelta
+from math import asin, cos, radians, sin, sqrt
 from pathlib import Path
 
 import folium
@@ -49,6 +50,14 @@ LISTING_SORT_OPTIONS = (
     "Size: largest first",
     "Size: smallest first",
 )
+SEARCH_FEATURES = {
+    "Dry": ("dry", "trocken"),
+    "Electricity": ("electricity", "strom"),
+    "24/7 access": ("24/7", "24h", "round-the-clock"),
+    "Camera surveillance": ("camera", "cctv", "kamera"),
+    "Ground-level access": ("ground-level", "ground level", "ebenerdig"),
+    "Heated": ("heated", "heizung", "heizbar"),
+}
 RENTAL_REQUEST_STATUS_LABELS = {
     "accepted": "Booking confirmed",
     "cancelled": "Cancelled by requester",
@@ -579,6 +588,11 @@ def show_listing_form(connection, user_email):
         title = st.text_input("Title")
         city = st.text_input("City")
         description = st.text_area("Description")
+        selected_features = st.multiselect(
+            "Equipment and access",
+            tuple(SEARCH_FEATURES),
+            help="These details make your listing easier to find.",
+        )
         size_sqm = st.number_input("Size in m²", min_value=0.0, step=1.0)
         price = st.number_input("Price per month in €", min_value=0.0, step=1.0)
         available_from = st.date_input("Available from")
@@ -597,12 +611,17 @@ def show_listing_form(connection, user_email):
 
     if submitted:
         try:
+            description_with_features = description.strip()
+            if selected_features:
+                description_with_features += "\n\nFeatures: " + ", ".join(
+                    selected_features
+                )
             create_listing(
                 connection,
                 user["id"],
                 title,
                 city,
-                description,
+                description_with_features,
                 size_sqm,
                 price,
                 available_from.isoformat(),
@@ -622,6 +641,43 @@ def show_listing_form(connection, user_email):
 def _favorite_listing_ids(connection, user_id):
     """Return saved listing IDs for a signed-in user, or an empty set."""
     return set(db.get_favorite_listing_ids(connection, user_id)) if user_id else set()
+
+
+def _distance_km(latitude_a, longitude_a, latitude_b, longitude_b):
+    """Return the great-circle distance between two public map points."""
+    latitude_delta = radians(latitude_b - latitude_a)
+    longitude_delta = radians(longitude_b - longitude_a)
+    distance = sin(latitude_delta / 2) ** 2 + cos(radians(latitude_a)) * cos(
+        radians(latitude_b)
+    ) * sin(longitude_delta / 2) ** 2
+    return 6371 * 2 * asin(sqrt(distance))
+
+
+def _filter_advanced_listings(
+    listings, minimum_price, maximum_size, selected_features, radius_center, radius_km
+):
+    """Apply browse filters that work consistently for SQLite and Supabase."""
+    filtered = []
+    for listing in listings:
+        if minimum_price is not None and listing["price_per_month_eur"] < minimum_price:
+            continue
+        if maximum_size is not None and listing["size_sqm"] > maximum_size:
+            continue
+        searchable_text = f"{listing['title']} {listing['description']}".lower()
+        if any(
+            not any(keyword in searchable_text for keyword in SEARCH_FEATURES[feature])
+            for feature in selected_features
+        ):
+            continue
+        if radius_center is not None:
+            latitude = listing["public_latitude"]
+            longitude = listing["public_longitude"]
+            if latitude is None or longitude is None:
+                continue
+            if _distance_km(latitude, longitude, *radius_center) > radius_km:
+                continue
+        filtered.append(listing)
+    return filtered
 
 
 def _show_favorite_button(
@@ -667,13 +723,22 @@ def show_listings(connection, *, include_map=True, user_id=None):
         st.session_state.pop("selected_listing_source", None)
         st.warning("This listing is no longer available.")
 
+    all_listings = db.get_listings(connection)
+    location_centers = {}
+    for listing in all_listings:
+        if listing["public_latitude"] is None or listing["public_longitude"] is None:
+            continue
+        location_centers.setdefault(listing["city"], []).append(
+            (listing["public_latitude"], listing["public_longitude"])
+        )
+
     st.markdown(
         '<div class="spaceshare-page-banner">Find &amp; Rent Storage</div>',
         unsafe_allow_html=True,
     )
     st.subheader("Available storage listings")
     with st.container(border=True):
-        filter_columns = st.columns(5)
+        filter_columns = st.columns(4)
         with filter_columns[0]:
             city = st.text_input(
                 "City",
@@ -704,12 +769,47 @@ def show_listings(connection, *, include_map=True, user_id=None):
                 value=None,
                 key="listing_filter_requested_start",
             )
-        with filter_columns[4]:
+        with st.columns(4)[0]:
             requested_end = st.date_input(
                 "Until",
                 value=None,
                 key="listing_filter_requested_end",
             )
+
+        advanced_open = st.toggle("More search filters", key="advanced_search_open")
+        if advanced_open:
+            price_column, size_column, radius_column = st.columns(3)
+            with price_column:
+                minimum_price = st.number_input(
+                    "Minimum price (€)", min_value=0.0, value=None, step=1.0
+                )
+            with size_column:
+                maximum_size = st.number_input(
+                    "Maximum size (m²)", min_value=0.0, value=None, step=1.0
+                )
+            with radius_column:
+                center_city = st.selectbox(
+                    "Search within radius of",
+                    ("Any location", *sorted(location_centers)),
+                )
+                radius_km = st.selectbox("Radius", (5, 10, 25, 50, 100), index=2)
+            selected_features = st.multiselect(
+                "Required features", tuple(SEARCH_FEATURES),
+                help="Features are matched from the listing title and description.",
+            )
+        else:
+            minimum_price = maximum_size = None
+            center_city = "Any location"
+            radius_km = None
+            selected_features = []
+
+    radius_center = None
+    if center_city != "Any location":
+        points = location_centers[center_city]
+        radius_center = (
+            sum(latitude for latitude, _ in points) / len(points),
+            sum(longitude for _, longitude in points) / len(points),
+        )
 
     if (requested_start is None) != (requested_end is None):
         st.error("Select both rental dates to filter by availability.")
@@ -727,6 +827,14 @@ def show_listings(connection, *, include_map=True, user_id=None):
             requested_start.isoformat() if requested_start else None
         ),
         requested_end=requested_end.isoformat() if requested_end else None,
+    )
+    listings = _filter_advanced_listings(
+        listings,
+        minimum_price,
+        maximum_size,
+        selected_features,
+        radius_center,
+        radius_km,
     )
 
     if not listings:
