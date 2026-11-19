@@ -1,5 +1,6 @@
 """Streamlit interface for browsing and managing SpaceShare listings."""
 
+import calendar
 import html
 from datetime import date, datetime, timedelta
 from math import asin, cos, radians, sin, sqrt
@@ -1062,6 +1063,7 @@ def show_listing_detail(connection, listing, user_id=None):
                 """,
                 unsafe_allow_html=True,
             )
+            show_availability_calendar(connection, listing)
             st.markdown("#### Description")
             st.write(listing["description"])
 
@@ -1093,6 +1095,33 @@ def show_listing_detail(connection, listing, user_id=None):
         map_key=f"listing_detail_map_{listing['id']}",
         is_detail_view=True,
     )
+
+
+def show_availability_calendar(connection, listing):
+    """Show the next three months, with confirmed bookings clearly marked."""
+    st.markdown("#### Availability calendar")
+    bookings = db.get_confirmed_booking_periods(connection, listing["id"])
+    booked_days = set()
+    for booking in bookings:
+        current = date.fromisoformat(booking["start_date"])
+        end = date.fromisoformat(booking["end_date"])
+        while current < end:
+            booked_days.add(current)
+            current += timedelta(days=1)
+    available_from = date.fromisoformat(listing["available_from"])
+    available_until = date.fromisoformat(listing["available_until"]) if listing["available_until"] else None
+    first_month = date.today().replace(day=1)
+    for offset in range(3):
+        month = (first_month.month - 1 + offset) % 12 + 1
+        year = first_month.year + (first_month.month - 1 + offset) // 12
+        rows = []
+        for week in calendar.monthcalendar(year, month):
+            rows.append(" ".join(
+                "" if not day else ("🔴" if date(year, month, day) in booked_days else "⚪" if date(year, month, day) < available_from or (available_until and date(year, month, day) > available_until) else "🟢") + f"{day:02d}"
+                for day in week
+            ))
+        st.caption(f"{calendar.month_name[month]} {year} · 🟢 available · 🔴 booked · ⚪ unavailable")
+        st.code("Mo Tu We Th Fr Sa Su\n" + "\n".join(rows), language=None)
 
 
 def show_saved_listings(connection, user_id):
