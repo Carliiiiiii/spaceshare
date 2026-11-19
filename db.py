@@ -23,7 +23,11 @@ def connect(database_path: Path) -> sqlite3.Connection:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
-            display_name TEXT
+            display_name TEXT,
+            bio TEXT NOT NULL DEFAULT '',
+            verification_status TEXT NOT NULL DEFAULT 'unverified',
+            profile_photo_data BLOB,
+            profile_photo_mime_type TEXT
         )
         """
     )
@@ -145,6 +149,14 @@ def connect(database_path: Path) -> sqlite3.Connection:
     user_columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
     if "display_name" not in user_columns:
         connection.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
+    if "bio" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''")
+    if "verification_status" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'unverified'")
+    if "profile_photo_data" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN profile_photo_data BLOB")
+    if "profile_photo_mime_type" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN profile_photo_mime_type TEXT")
     if "available_until" not in listing_columns:
         connection.execute("ALTER TABLE listings ADD COLUMN available_until TEXT")
     if "photo_data" not in listing_columns:
@@ -212,15 +224,27 @@ def get_user_by_email(
     if isinstance(connection, SupabaseConnection):
         response = (
             connection.client.table("users")
-            .select("id,email,password_hash,display_name")
+            .select("id,email,password_hash,display_name,bio,verification_status,profile_photo_url")
             .eq("email", email)
             .limit(1)
             .execute()
         )
         return response.data[0] if response.data else None
     return connection.execute(
-        "SELECT id, email, password_hash, display_name FROM users WHERE email = ?",
+        "SELECT id, email, password_hash, display_name, bio, verification_status, profile_photo_data, profile_photo_mime_type FROM users WHERE email = ?",
         (email,),
+    ).fetchone()
+
+
+def get_public_user_profile(connection, user_id):
+    """Return only the profile fields that may be shown to other users."""
+    fields = "id,display_name,bio,verification_status,profile_photo_url"
+    if isinstance(connection, SupabaseConnection):
+        response = connection.client.table("users").select(fields).eq("id", user_id).limit(1).execute()
+        return response.data[0] if response.data else None
+    return connection.execute(
+        "SELECT id, display_name, bio, verification_status, profile_photo_data FROM users WHERE id = ?",
+        (user_id,),
     ).fetchone()
 
 
@@ -242,6 +266,23 @@ def update_user_display_name(connection, user_id, display_name: str) -> None:
     connection.commit()
     if cursor.rowcount != 1:
         raise ValueError("The display name could not be updated.")
+
+
+def update_user_profile(connection, user_id, display_name, bio, verification_status, photo_data, photo_mime_type):
+    """Update the public profile fields owned by one user."""
+    if isinstance(connection, SupabaseConnection):
+        payload = {"display_name": display_name, "bio": bio, "verification_status": verification_status}
+        if photo_data:
+            path = f"profiles/{user_id}/{uuid.uuid4().hex}"
+            connection.client.storage.from_(connection.settings.storage_bucket).upload(path, photo_data, {"content-type": photo_mime_type, "upsert": "true"})
+            payload["profile_photo_path"] = path
+            payload["profile_photo_url"] = connection.client.storage.from_(connection.settings.storage_bucket).get_public_url(path)
+        response = connection.client.table("users").update(payload).eq("id", user_id).execute()
+        if not response.data:
+            raise ValueError("The profile could not be updated.")
+        return
+    connection.execute("UPDATE users SET display_name=?, bio=?, verification_status=?, profile_photo_data=COALESCE(?, profile_photo_data), profile_photo_mime_type=COALESCE(?, profile_photo_mime_type) WHERE id=?", (display_name, bio, verification_status, photo_data, photo_mime_type, user_id))
+    connection.commit()
 
 
 def create_listing(
