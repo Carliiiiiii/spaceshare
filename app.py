@@ -27,6 +27,7 @@ from logic import (
     mark_listing_conversation_messages_read,
     mark_messages_read,
     register_user,
+    update_display_name,
     send_listing_conversation_message,
     send_listing_question,
     send_message,
@@ -221,6 +222,7 @@ def show_brand_header(
 def show_registration(connection):
     st.subheader("Create an account")
     with st.form("registration_form"):
+        display_name = st.text_input("Display name", key="registration_display_name")
         email = st.text_input("Email address", key="registration_email")
         password = st.text_input(
             "Password", type="password", key="registration_password"
@@ -229,11 +231,41 @@ def show_registration(connection):
 
     if submitted:
         try:
-            register_user(connection, email, password)
+            register_user(connection, email, password, display_name)
         except ValueError as error:
             st.error(str(error))
         else:
             st.success("Account created. You can now log in.")
+
+
+def show_profile(connection, user):
+    """Allow the signed-in user to edit only their public display name."""
+    st.subheader("My profile")
+    current_name = user["display_name"] or "Storage user"
+    with st.form("profile_form"):
+        display_name = st.text_input("Display name", value=current_name, max_chars=80)
+        submitted = st.form_submit_button("Save profile")
+    if submitted:
+        try:
+            update_display_name(connection, user["id"], display_name)
+        except ValueError as error:
+            st.error(str(error))
+        else:
+            st.success("Profile updated.")
+            st.rerun()
+
+
+def _chat_person_name(value, fallback):
+    """Return a public name, never an email address."""
+    return (value or fallback).strip()
+
+
+def _row_value(row, key):
+    """Read a field from either a SQLite Row or a Supabase dict."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
 
 
 def show_footer():
@@ -985,7 +1017,12 @@ def show_chats(connection, user_id):
                 if conversation["owner_id"] == user_id
                 else "Your question"
             )
-            st.markdown(f"**{role}: {conversation['title']}**")
+            other_name = (
+                _chat_person_name(_row_value(conversation, "participant_name"), "Storage seeker")
+                if conversation["owner_id"] == user_id
+                else _chat_person_name(_row_value(conversation, "owner_name"), "Storage owner")
+            )
+            st.markdown(f"**{role}: {conversation['title']} · {other_name}**")
             show_listing_conversation_chat(connection, user_id, conversation)
 
     if requests:
@@ -1006,6 +1043,7 @@ def show_chats(connection, user_id):
             )
             st.markdown(
                 f"**{role}: {request['title']}** · "
+                f"{_chat_person_name(_row_value(request, 'requester_name') if request['owner_id'] == user_id else _row_value(request, 'owner_name'), 'Storage seeker' if request['owner_id'] == user_id else 'Storage owner')} · "
                 f"Status: {_rental_request_status_label(request)}"
             )
             show_request_chat(connection, user_id, request)
@@ -1013,6 +1051,12 @@ def show_chats(connection, user_id):
 
 def show_listing_conversation_chat(connection, user_id, conversation):
     with st.expander("Open chat"):
+        other_name = (
+            _chat_person_name(_row_value(conversation, "participant_name"), "Storage seeker")
+            if conversation["owner_id"] == user_id
+            else _chat_person_name(_row_value(conversation, "owner_name"), "Storage owner")
+        )
+        st.markdown(f"**{conversation['title']} · {other_name}**")
         messages = get_listing_conversation_messages(
             connection, conversation["id"], user_id
         )
@@ -1023,9 +1067,9 @@ def show_listing_conversation_chat(connection, user_id, conversation):
             for message in messages:
                 is_current_user = message["sender_id"] == user_id
                 sender_role = "You" if is_current_user else (
-                    "Interested user"
-                    if message["sender_id"] == message["participant_id"]
-                    else "Listing owner"
+                    _chat_person_name(_row_value(conversation, "owner_name"), "Storage owner")
+                    if conversation["owner_id"] == user_id
+                    else _chat_person_name(_row_value(conversation, "participant_name"), "Storage seeker")
                 )
                 try:
                     sent_at = datetime.fromisoformat(message["sent_at"])
@@ -1065,14 +1109,21 @@ def show_listing_conversation_chat(connection, user_id, conversation):
 
 def show_request_chat(connection, user_id, request):
     with st.expander("Open chat"):
+        other_name = (
+            _chat_person_name(_row_value(request, "requester_name"), "Storage seeker")
+            if request["owner_id"] == user_id
+            else _chat_person_name(_row_value(request, "owner_name"), "Storage owner")
+        )
+        st.markdown(f"**{request['title']} · {other_name}**")
         messages = get_messages(connection, request["id"], user_id)
         mark_messages_read(connection, request["id"], user_id)
         if messages:
             for message in messages:
                 is_current_user = message["sender_id"] == user_id
                 sender_role = "You" if is_current_user else (
-                    "Renter" if message["sender_id"] == message["requester_id"]
-                    else "Listing owner"
+                    _chat_person_name(_row_value(request, "requester_name"), "Storage seeker")
+                    if message["sender_id"] == message["requester_id"]
+                    else _chat_person_name(_row_value(request, "owner_name"), "Storage owner")
                 )
                 try:
                     sent_at = datetime.fromisoformat(message["sent_at"])
@@ -1311,13 +1362,14 @@ def main():
                 chats_label = "Chats"
                 if unread_count:
                     chats_label += " ①"
-                find_tab, list_tab, my_listings_tab, requests_tab, chats_tab = st.tabs(
+                find_tab, list_tab, my_listings_tab, requests_tab, chats_tab, profile_tab = st.tabs(
                     [
                         "Find storage",
                         "List a space",
                         "My listings",
                         requests_label,
                         chats_label,
+                        "My profile",
                     ]
                 )
                 with find_tab:
@@ -1330,6 +1382,8 @@ def main():
                     show_rental_requests(connection, user["id"])
                 with chats_tab:
                     show_chats(connection, user["id"])
+                with profile_tab:
+                    show_profile(connection, user)
             show_footer()
             return
 
