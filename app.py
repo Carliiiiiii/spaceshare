@@ -131,6 +131,72 @@ def show_brand_header(
         div.stButton > button[kind="primary"], div.stFormSubmitButton > button { background: #F77B32; color: white; border: 0; }
         div.stButton > button[kind="primary"]:hover, div.stFormSubmitButton > button:hover { background: #D95F1E; color: white; }
         .spaceshare-header { align-items: center; }
+        .spaceshare-page-banner {
+            background: #FFF0E6;
+            border-left: 0.35rem solid #F77B32;
+            color: #17324D;
+            font-size: clamp(1.5rem, 3vw, 2.4rem);
+            font-weight: 800;
+            letter-spacing: 0.01em;
+            margin: 1.15rem 0 1.25rem;
+            padding: 0.25rem 1.25rem;
+            text-align: left;
+        }
+        .detail-price {
+            color: #D95F1E;
+            font-size: 1.7rem;
+            font-weight: 800;
+            margin: 1rem 0;
+            text-align: left;
+        }
+        .availability-grid {
+            display: flex;
+            gap: 0.75rem;
+            margin: 0.5rem 0 1.25rem;
+        }
+        .availability-box {
+            background: #F8FCFE;
+            border: 1px solid #BFE8F8;
+            border-radius: 0.65rem;
+            flex: 1;
+            padding: 0.65rem 0.8rem;
+        }
+        .detail-label {
+            color: #6B8297;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .detail-stat-grid {
+            display: flex;
+            gap: 0.75rem;
+            margin: 1.25rem 0;
+        }
+        .detail-stat {
+            background: #F8FCFE;
+            border: 1px solid #D7E7EF;
+            border-radius: 0.65rem;
+            flex: 1;
+            min-width: 0;
+            padding: 0.75rem 0.85rem;
+        }
+        .detail-stat strong {
+            color: #17324D;
+            display: block;
+            font-size: 1.05rem;
+            margin-top: 0.25rem;
+        }
+        .detail-stat-price strong {
+            color: #D95F1E;
+        }
+        .spaceshare-footer {
+            border-top: 1px solid #D7E7EF;
+            color: #6B8297;
+            font-size: 0.85rem;
+            margin-top: 3rem;
+            padding: 1rem 0 0.5rem;
+            text-align: center;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -168,6 +234,14 @@ def show_registration(connection):
             st.error(str(error))
         else:
             st.success("Account created. You can now log in.")
+
+
+def show_footer():
+    """Show the shared, minimal application footer."""
+    st.markdown(
+        '<div class="spaceshare-footer">SpaceShare · Storage made simple</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def show_login(connection, cookie_manager):
@@ -511,44 +585,49 @@ def show_listings(connection, *, include_map=True):
         st.session_state.pop("selected_listing_id", None)
         st.warning("This listing is no longer available.")
 
+    st.markdown(
+        '<div class="spaceshare-page-banner">Find &amp; Rent Storage</div>',
+        unsafe_allow_html=True,
+    )
     st.subheader("Available storage listings")
-    filter_columns = st.columns(5)
-    with filter_columns[0]:
-        city = st.text_input(
-            "City",
-            placeholder="Any city",
-            key="listing_filter_city",
-        )
-    with filter_columns[1]:
-        minimum_size_sqm = st.number_input(
-            "Minimum size in m²",
-            min_value=0.0,
-            value=None,
-            step=1.0,
-            placeholder="Any size",
-            key="listing_filter_minimum_size",
-        )
-    with filter_columns[2]:
-        maximum_price_per_month_eur = st.number_input(
-            "Maximum monthly price in €",
-            min_value=0.0,
-            value=None,
-            step=1.0,
-            placeholder="Any price",
-            key="listing_filter_maximum_price",
-        )
-    with filter_columns[3]:
-        requested_start = st.date_input(
-            "Desired rental start",
-            value=None,
-            key="listing_filter_requested_start",
-        )
-    with filter_columns[4]:
-        requested_end = st.date_input(
-            "Desired rental end",
-            value=None,
-            key="listing_filter_requested_end",
-        )
+    with st.container(border=True):
+        filter_columns = st.columns(5)
+        with filter_columns[0]:
+            city = st.text_input(
+                "City",
+                placeholder="Any city",
+                key="listing_filter_city",
+            )
+        with filter_columns[1]:
+            minimum_size_sqm = st.number_input(
+                "Min size (m²)",
+                min_value=0.0,
+                value=None,
+                step=1.0,
+                placeholder="Any size",
+                key="listing_filter_minimum_size",
+            )
+        with filter_columns[2]:
+            maximum_price_per_month_eur = st.number_input(
+                "Max price (€)",
+                min_value=0.0,
+                value=None,
+                step=1.0,
+                placeholder="Any price",
+                key="listing_filter_maximum_price",
+            )
+        with filter_columns[3]:
+            requested_start = st.date_input(
+                "From",
+                value=None,
+                key="listing_filter_requested_start",
+            )
+        with filter_columns[4]:
+            requested_end = st.date_input(
+                "Until",
+                value=None,
+                key="listing_filter_requested_end",
+            )
 
     if (requested_start is None) != (requested_end is None):
         st.error("Select both rental dates to filter by availability.")
@@ -630,7 +709,21 @@ def show_listing_card(listing):
                 "border-top: 2px solid #D9E2E8;'>",
                 unsafe_allow_html=True,
             )
-            st.markdown(f"**{listing['city']}**")
+            st.markdown(
+                f"""
+                <div class="detail-stat-grid">
+                    <div class="detail-stat">
+                        <div class="detail-label">City</div>
+                        <strong>{listing['city']}</strong>
+                    </div>
+                    <div class="detail-stat">
+                        <div class="detail-label">Space</div>
+                        <strong>{listing['size_sqm']} m²</strong>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             description = str(listing["description"]).strip()
             summary = (
                 description
@@ -643,10 +736,18 @@ def show_listing_card(listing):
                 unsafe_allow_html=True,
             )
             st.markdown(
-                f"<div class='listing-meta'><b>{listing['size_sqm']} m²</b> · "
-                f"Available {listing['available_from']} – "
-                f"{listing['available_until'] or 'unlimited'}<br>"
-                f"Minimum stay: {listing['minimum_rental_days']} days</div>",
+                f"""
+                <div class="detail-stat-grid">
+                    <div class="detail-stat">
+                        <div class="detail-label">Available</div>
+                        <strong>{listing['available_from']} – {listing['available_until'] or 'Unlimited'}</strong>
+                    </div>
+                    <div class="detail-stat">
+                        <div class="detail-label">Minimum stay</div>
+                        <strong>{listing['minimum_rental_days']} days</strong>
+                    </div>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
 
@@ -661,40 +762,74 @@ def show_listing_detail(connection, listing):
         st.session_state.pop("selected_listing_id", None)
         st.rerun()
 
-    st.subheader(listing["title"])
-    photo_url = listing["photo_url"]
-    photo_data = listing["photo_data"]
-    media_column, details_column = st.columns((1, 2), gap="large")
-    with media_column:
-        if photo_url:
-            st.image(photo_url, caption=listing["title"])
-        elif photo_data:
-            st.image(photo_data, caption=listing["title"])
-        else:
-            st.info("No photo available.")
-    with details_column:
-        st.markdown(f"**City:** {listing['city']}")
-        st.markdown(
-            f"<div class='listing-price'>€{listing['price_per_month_eur']:.2f} / month</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f"<div class='listing-meta'><b>{listing['size_sqm']} m²</b><br>"
-            f"Minimum stay: {listing['minimum_rental_days']} days</div>",
-            unsafe_allow_html=True,
-        )
+    information_column, contact_column = st.columns((2, 1), gap="large")
+    with information_column:
+        with st.container(border=True):
+            photo_url = listing["photo_url"]
+            photo_data = listing["photo_data"]
+            media_column, details_column = st.columns((1, 2), gap="large")
+            with media_column:
+                if photo_url:
+                    st.image(photo_url)
+                elif photo_data:
+                    st.image(photo_data)
+                else:
+                    st.info("No photo available.")
+            with details_column:
+                st.subheader(listing["title"])
 
-    st.markdown("#### Description")
-    st.write(listing["description"])
-    st.markdown("#### Availability")
-    st.write(f"Available from: {listing['available_from']}")
-    st.write(f"Available until: {listing['available_until'] or 'Unlimited'}")
+            st.markdown(
+                f"""
+                <div class="detail-stat-grid">
+                    <div class="detail-stat">
+                        <div class="detail-label">City</div>
+                        <strong>{listing['city']}</strong>
+                    </div>
+                    <div class="detail-stat detail-stat-price">
+                        <div class="detail-label">Monthly price</div>
+                        <strong>€{listing['price_per_month_eur']:.2f}</strong>
+                    </div>
+                    <div class="detail-stat">
+                        <div class="detail-label">Space</div>
+                        <strong>{listing['size_sqm']} m²</strong>
+                    </div>
+                    <div class="detail-stat">
+                        <div class="detail-label">Minimum stay</div>
+                        <strong>{listing['minimum_rental_days']} days</strong>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            st.markdown("#### Availability")
+            st.markdown(
+                f"""
+                <div class="availability-grid">
+                    <div class="availability-box">
+                        <div class="detail-label">Available from</div>
+                        <strong>{listing['available_from']}</strong>
+                    </div>
+                    <div class="availability-box">
+                        <div class="detail-label">Available until</div>
+                        <strong>{listing['available_until'] or 'Unlimited'}</strong>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown("#### Description")
+            st.write(listing["description"])
+
+    with contact_column:
+        with st.container(border=True):
+            show_listing_contact_actions(connection, listing)
+
     show_listing_map(
         [listing],
         map_key=f"listing_detail_map_{listing['id']}",
         is_detail_view=True,
     )
-    show_listing_contact_actions(connection, listing)
 
 
 def show_listing_contact_actions(connection, listing):
@@ -1195,11 +1330,11 @@ def main():
                     show_rental_requests(connection, user["id"])
                 with chats_tab:
                     show_chats(connection, user["id"])
+            show_footer()
             return
 
         search_column, right_column = st.columns((4, 2), gap="large")
         with search_column:
-            st.subheader("Find storage")
             listings = show_listings(connection, include_map=False)
         with right_column:
             if st.session_state.get("show_auth_panel"):
@@ -1213,6 +1348,7 @@ def main():
                     st.rerun()
             if listings:
                 show_listing_map(listings)
+        show_footer()
     finally:
         connection.close()
 
