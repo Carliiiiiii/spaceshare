@@ -1,7 +1,7 @@
 """Streamlit interface for browsing and managing SpaceShare listings."""
 
 import html
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import folium
@@ -27,6 +27,7 @@ from logic import (
     mark_listing_conversation_messages_read,
     mark_messages_read,
     register_user,
+    update_display_name,
     send_listing_conversation_message,
     send_listing_question,
     send_message,
@@ -86,6 +87,8 @@ def get_cookie_manager():
 
 def restore_logged_in_user(connection, cookie_manager):
     """Restore a user from a valid signed cookie, or clear an expired one."""
+    if st.session_state.get("logged_out"):
+        return None
     current_email = st.session_state.get("user_email")
     if current_email:
         return current_email
@@ -107,7 +110,12 @@ def restore_logged_in_user(connection, cookie_manager):
     return email
 
 
-def show_brand_header():
+def show_brand_header(
+    show_login_button=False,
+    show_logout_button=False,
+    connection=None,
+    cookie_manager=None,
+):
     """Show the responsive SpaceShare brand header."""
     st.markdown(
         """
@@ -123,17 +131,99 @@ def show_brand_header():
         .listing-price { color: #D95F1E; font-size: 1.2rem; font-weight: 700; }
         div.stButton > button[kind="primary"], div.stFormSubmitButton > button { background: #F77B32; color: white; border: 0; }
         div.stButton > button[kind="primary"]:hover, div.stFormSubmitButton > button:hover { background: #D95F1E; color: white; }
+        .spaceshare-header { align-items: center; }
+        .spaceshare-page-banner {
+            background: #FFF0E6;
+            border-left: 0.35rem solid #F77B32;
+            color: #17324D;
+            font-size: clamp(1.5rem, 3vw, 2.4rem);
+            font-weight: 800;
+            letter-spacing: 0.01em;
+            margin: 1.15rem 0 1.25rem;
+            padding: 0.25rem 1.25rem;
+            text-align: left;
+        }
+        .detail-price {
+            color: #D95F1E;
+            font-size: 1.7rem;
+            font-weight: 800;
+            margin: 1rem 0;
+            text-align: left;
+        }
+        .availability-grid {
+            display: flex;
+            gap: 0.75rem;
+            margin: 0.5rem 0 1.25rem;
+        }
+        .availability-box {
+            background: #F8FCFE;
+            border: 1px solid #BFE8F8;
+            border-radius: 0.65rem;
+            flex: 1;
+            padding: 0.65rem 0.8rem;
+        }
+        .detail-label {
+            color: #6B8297;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .detail-stat-grid {
+            display: flex;
+            gap: 0.75rem;
+            margin: 1.25rem 0;
+        }
+        .detail-stat {
+            background: #F8FCFE;
+            border: 1px solid #D7E7EF;
+            border-radius: 0.65rem;
+            flex: 1;
+            min-width: 0;
+            padding: 0.75rem 0.85rem;
+        }
+        .detail-stat strong {
+            color: #17324D;
+            display: block;
+            font-size: 1.05rem;
+            margin-top: 0.25rem;
+        }
+        .detail-stat-price strong {
+            color: #D95F1E;
+        }
+        .spaceshare-footer {
+            border-top: 1px solid #D7E7EF;
+            color: #6B8297;
+            font-size: 0.85rem;
+            margin-top: 3rem;
+            padding: 1rem 0 0.5rem;
+            text-align: center;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    st.image(str(LOGO_PATH), width=260)
+    logo_column, _, action_column = st.columns((3, 6, 1), gap="small")
+    with logo_column:
+        st.image(str(LOGO_PATH), width=260)
+    if show_login_button or show_logout_button:
+        with action_column:
+            header_label = "Register & Log in" if show_login_button else "Log out"
+            header_key = "header_login_button" if show_login_button else "header_logout_button"
+            if st.button(header_label, type="primary", key=header_key):
+                if show_logout_button:
+                    cookie_manager.delete(COOKIE_NAME)
+                    st.session_state.pop("user_email", None)
+                    st.session_state["logged_out"] = True
+                    st.rerun()
+                st.session_state["show_auth_panel"] = True
+                st.rerun()
 
 
 def show_registration(connection):
     st.subheader("Create an account")
     with st.form("registration_form"):
-        email = st.text_input("Email address", key="registration_email")
+        display_name = st.text_input("Name", key="registration_display_name")
+        email = st.text_input("E-mail address", key="registration_email")
         password = st.text_input(
             "Password", type="password", key="registration_password"
         )
@@ -141,17 +231,65 @@ def show_registration(connection):
 
     if submitted:
         try:
-            register_user(connection, email, password)
+            register_user(connection, email, password, display_name)
         except ValueError as error:
             st.error(str(error))
         else:
             st.success("Account created. You can now log in.")
 
 
+def show_profile(connection, user):
+    """Allow the signed-in user to edit only their public display name."""
+    st.subheader("My profile")
+    current_name = user["display_name"] or "Storage user"
+    with st.form("profile_form"):
+        display_name = st.text_input("Display name", value=current_name, max_chars=80)
+        submitted = st.form_submit_button("Save profile")
+    if submitted:
+        try:
+            update_display_name(connection, user["id"], display_name)
+        except ValueError as error:
+            st.error(str(error))
+        else:
+            st.success("Profile updated.")
+            st.rerun()
+
+
+def _chat_person_name(value, fallback):
+    """Return a public name, never an email address."""
+    return (value or fallback).strip()
+
+
+def _row_value(row, key):
+    """Read a field from either a SQLite Row or a Supabase dict."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
+
+
+def _format_date(value):
+    """Format stored ISO dates for people while keeping database values unchanged."""
+    if not value:
+        return "Unlimited"
+    try:
+        return date.fromisoformat(str(value)).strftime("%-d %B %Y")
+    except ValueError:
+        return str(value)
+
+
+def show_footer():
+    """Show the shared, minimal application footer."""
+    st.markdown(
+        '<div class="spaceshare-footer">SpaceShare · Storage made simple</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def show_login(connection, cookie_manager):
     st.subheader("Log in")
     with st.form("login_form"):
-        email = st.text_input("Email address", key="login_email")
+        email = st.text_input("E-mail address", key="login_email")
         password = st.text_input("Password", type="password", key="login_password")
         submitted = st.form_submit_button("Log in")
 
@@ -163,6 +301,7 @@ def show_login(connection, cookie_manager):
         else:
             if valid_password:
                 normalized_email = email.strip().lower()
+                st.session_state.pop("logged_out", None)
                 st.session_state["user_email"] = normalized_email
                 cookie_manager.set(
                     COOKIE_NAME,
@@ -478,7 +617,7 @@ def show_listing_form(connection, user_email):
             st.success("Listing created.")
 
 
-def show_listings(connection):
+def show_listings(connection, *, include_map=True):
     selected_listing_id = st.session_state.get("selected_listing_id")
     if selected_listing_id is not None:
         selected_listing = db.get_listing_by_id(connection, selected_listing_id)
@@ -488,44 +627,49 @@ def show_listings(connection):
         st.session_state.pop("selected_listing_id", None)
         st.warning("This listing is no longer available.")
 
+    st.markdown(
+        '<div class="spaceshare-page-banner">Find &amp; Rent Storage</div>',
+        unsafe_allow_html=True,
+    )
     st.subheader("Available storage listings")
-    filter_columns = st.columns(5)
-    with filter_columns[0]:
-        city = st.text_input(
-            "City",
-            placeholder="Any city",
-            key="listing_filter_city",
-        )
-    with filter_columns[1]:
-        minimum_size_sqm = st.number_input(
-            "Minimum size in m²",
-            min_value=0.0,
-            value=None,
-            step=1.0,
-            placeholder="Any size",
-            key="listing_filter_minimum_size",
-        )
-    with filter_columns[2]:
-        maximum_price_per_month_eur = st.number_input(
-            "Maximum monthly price in €",
-            min_value=0.0,
-            value=None,
-            step=1.0,
-            placeholder="Any price",
-            key="listing_filter_maximum_price",
-        )
-    with filter_columns[3]:
-        requested_start = st.date_input(
-            "Desired rental start",
-            value=None,
-            key="listing_filter_requested_start",
-        )
-    with filter_columns[4]:
-        requested_end = st.date_input(
-            "Desired rental end",
-            value=None,
-            key="listing_filter_requested_end",
-        )
+    with st.container(border=True):
+        filter_columns = st.columns(5)
+        with filter_columns[0]:
+            city = st.text_input(
+                "City",
+                placeholder="Any city",
+                key="listing_filter_city",
+            )
+        with filter_columns[1]:
+            minimum_size_sqm = st.number_input(
+                "Min size (m²)",
+                min_value=0.0,
+                value=None,
+                step=1.0,
+                placeholder="Any size",
+                key="listing_filter_minimum_size",
+            )
+        with filter_columns[2]:
+            maximum_price_per_month_eur = st.number_input(
+                "Max price (€)",
+                min_value=0.0,
+                value=None,
+                step=1.0,
+                placeholder="Any price",
+                key="listing_filter_maximum_price",
+            )
+        with filter_columns[3]:
+            requested_start = st.date_input(
+                "From",
+                value=None,
+                key="listing_filter_requested_start",
+            )
+        with filter_columns[4]:
+            requested_end = st.date_input(
+                "Until",
+                value=None,
+                key="listing_filter_requested_end",
+            )
 
     if (requested_start is None) != (requested_end is None):
         st.error("Select both rental dates to filter by availability.")
@@ -582,7 +726,7 @@ def show_listings(connection):
         st.markdown("#### Listings")
         for listing in listings:
             show_listing_card(listing)
-    else:
+    elif include_map:
         show_listing_map(listings, interactive=True)
     return listings
 
@@ -607,7 +751,21 @@ def show_listing_card(listing):
                 "border-top: 2px solid #D9E2E8;'>",
                 unsafe_allow_html=True,
             )
-            st.markdown(f"**{listing['city']}**")
+            st.markdown(
+                f"""
+                <div class="detail-stat-grid">
+                    <div class="detail-stat">
+                        <div class="detail-label">City</div>
+                        <strong>{listing['city']}</strong>
+                    </div>
+                    <div class="detail-stat">
+                        <div class="detail-label">Space</div>
+                        <strong>{listing['size_sqm']} m²</strong>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             description = str(listing["description"]).strip()
             summary = (
                 description
@@ -620,10 +778,18 @@ def show_listing_card(listing):
                 unsafe_allow_html=True,
             )
             st.markdown(
-                f"<div class='listing-meta'><b>{listing['size_sqm']} m²</b> · "
-                f"Available {listing['available_from']} – "
-                f"{listing['available_until'] or 'unlimited'}<br>"
-                f"Minimum stay: {listing['minimum_rental_days']} days</div>",
+                f"""
+                <div class="detail-stat-grid">
+                    <div class="detail-stat">
+                        <div class="detail-label">Available</div>
+                        <strong>{_format_date(listing['available_from'])} – {_format_date(listing['available_until'])}</strong>
+                    </div>
+                    <div class="detail-stat">
+                        <div class="detail-label">Minimum stay</div>
+                        <strong>{listing['minimum_rental_days']} days</strong>
+                    </div>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
 
@@ -638,40 +804,74 @@ def show_listing_detail(connection, listing):
         st.session_state.pop("selected_listing_id", None)
         st.rerun()
 
-    st.subheader(listing["title"])
-    photo_url = listing["photo_url"]
-    photo_data = listing["photo_data"]
-    media_column, details_column = st.columns((1, 2), gap="large")
-    with media_column:
-        if photo_url:
-            st.image(photo_url, caption=listing["title"])
-        elif photo_data:
-            st.image(photo_data, caption=listing["title"])
-        else:
-            st.info("No photo available.")
-    with details_column:
-        st.markdown(f"**City:** {listing['city']}")
-        st.markdown(
-            f"<div class='listing-price'>€{listing['price_per_month_eur']:.2f} / month</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f"<div class='listing-meta'><b>{listing['size_sqm']} m²</b><br>"
-            f"Minimum stay: {listing['minimum_rental_days']} days</div>",
-            unsafe_allow_html=True,
-        )
+    information_column, contact_column = st.columns((2, 1), gap="large")
+    with information_column:
+        with st.container(border=True):
+            photo_url = listing["photo_url"]
+            photo_data = listing["photo_data"]
+            media_column, details_column = st.columns((1, 2), gap="large")
+            with media_column:
+                if photo_url:
+                    st.image(photo_url)
+                elif photo_data:
+                    st.image(photo_data)
+                else:
+                    st.info("No photo available.")
+            with details_column:
+                st.subheader(listing["title"])
 
-    st.markdown("#### Description")
-    st.write(listing["description"])
-    st.markdown("#### Availability")
-    st.write(f"Available from: {listing['available_from']}")
-    st.write(f"Available until: {listing['available_until'] or 'Unlimited'}")
+            st.markdown(
+                f"""
+                <div class="detail-stat-grid">
+                    <div class="detail-stat">
+                        <div class="detail-label">City</div>
+                        <strong>{listing['city']}</strong>
+                    </div>
+                    <div class="detail-stat detail-stat-price">
+                        <div class="detail-label">Monthly price</div>
+                        <strong>€{listing['price_per_month_eur']:.2f}</strong>
+                    </div>
+                    <div class="detail-stat">
+                        <div class="detail-label">Space</div>
+                        <strong>{listing['size_sqm']} m²</strong>
+                    </div>
+                    <div class="detail-stat">
+                        <div class="detail-label">Minimum stay</div>
+                        <strong>{listing['minimum_rental_days']} days</strong>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            st.markdown("#### Availability")
+            st.markdown(
+                f"""
+                <div class="availability-grid">
+                    <div class="availability-box">
+                        <div class="detail-label">Available from</div>
+                        <strong>{_format_date(listing['available_from'])}</strong>
+                    </div>
+                    <div class="availability-box">
+                        <div class="detail-label">Available until</div>
+                        <strong>{_format_date(listing['available_until'])}</strong>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown("#### Description")
+            st.write(listing["description"])
+
+    with contact_column:
+        with st.container(border=True):
+            show_listing_contact_actions(connection, listing)
+
     show_listing_map(
         [listing],
         map_key=f"listing_detail_map_{listing['id']}",
         is_detail_view=True,
     )
-    show_listing_contact_actions(connection, listing)
 
 
 def show_listing_contact_actions(connection, listing):
@@ -718,13 +918,29 @@ def show_listing_contact_actions(connection, listing):
                 st.success("Question sent. Continue the conversation in Chats.")
 
     with st.form(f"request_listing_{listing['id']}"):
+        earliest_request_start = date.fromisoformat(listing["available_from"])
+        earliest_request_end = earliest_request_start + timedelta(
+            days=int(listing["minimum_rental_days"])
+        )
+        request_start_key = f"request_start_{listing['id']}"
+        request_end_key = f"request_end_{listing['id']}"
+        stored_start = st.session_state.get(request_start_key)
+        stored_end = st.session_state.get(request_end_key)
+        if stored_start is not None and stored_start < earliest_request_start:
+            st.session_state.pop(request_start_key, None)
+        if stored_end is not None and stored_end < earliest_request_end:
+            st.session_state.pop(request_end_key, None)
         request_start = st.date_input(
             "Rental start date",
-            key=f"request_start_{listing['id']}",
+            value=earliest_request_start,
+            min_value=earliest_request_start,
+            key=request_start_key,
         )
         request_end = st.date_input(
             "Rental end date",
-            key=f"request_end_{listing['id']}",
+            value=earliest_request_end,
+            min_value=earliest_request_end,
+            key=request_end_key,
         )
         request_submitted = st.form_submit_button("Send rental request")
 
@@ -758,8 +974,8 @@ def show_rental_requests(connection, user_id):
         st.info("You have not sent any rental requests.")
     for request in sent_requests:
         st.write(
-            f"**{request['title']}** — {request['start_date']} to "
-            f"{request['end_date']} — **{_rental_request_status_label(request)}**"
+            f"**{request['title']}** — {_format_date(request['start_date'])} to "
+            f"{_format_date(request['end_date'])} — **{_rental_request_status_label(request)}**"
         )
         if request["status"] == "pending":
             if st.button("Cancel request", key=f"cancel_request_{request['id']}"):
@@ -775,8 +991,8 @@ def show_rental_requests(connection, user_id):
         st.info("No one has requested your listings yet.")
     for request in incoming_requests:
         st.write(
-            f"**{request['title']}** — {request['start_date']} to "
-            f"{request['end_date']} — **{_rental_request_status_label(request)}**"
+            f"**{request['title']}** — {_format_date(request['start_date'])} to "
+            f"{_format_date(request['end_date'])} — **{_rental_request_status_label(request)}**"
         )
         if request["owner_id"] == user_id and request["status"] == "pending":
             columns = st.columns(2)
@@ -811,7 +1027,12 @@ def show_chats(connection, user_id):
                 if conversation["owner_id"] == user_id
                 else "Your question"
             )
-            st.markdown(f"**{role}: {conversation['title']}**")
+            other_name = (
+                _chat_person_name(_row_value(conversation, "participant_name"), "Storage seeker")
+                if conversation["owner_id"] == user_id
+                else _chat_person_name(_row_value(conversation, "owner_name"), "Storage owner")
+            )
+            st.markdown(f"**{role}: {conversation['title']} · {other_name}**")
             show_listing_conversation_chat(connection, user_id, conversation)
 
     if requests:
@@ -832,6 +1053,7 @@ def show_chats(connection, user_id):
             )
             st.markdown(
                 f"**{role}: {request['title']}** · "
+                f"{_chat_person_name(_row_value(request, 'requester_name') if request['owner_id'] == user_id else _row_value(request, 'owner_name'), 'Storage seeker' if request['owner_id'] == user_id else 'Storage owner')} · "
                 f"Status: {_rental_request_status_label(request)}"
             )
             show_request_chat(connection, user_id, request)
@@ -839,6 +1061,12 @@ def show_chats(connection, user_id):
 
 def show_listing_conversation_chat(connection, user_id, conversation):
     with st.expander("Open chat"):
+        other_name = (
+            _chat_person_name(_row_value(conversation, "participant_name"), "Storage seeker")
+            if conversation["owner_id"] == user_id
+            else _chat_person_name(_row_value(conversation, "owner_name"), "Storage owner")
+        )
+        st.markdown(f"**{conversation['title']} · {other_name}**")
         messages = get_listing_conversation_messages(
             connection, conversation["id"], user_id
         )
@@ -849,9 +1077,9 @@ def show_listing_conversation_chat(connection, user_id, conversation):
             for message in messages:
                 is_current_user = message["sender_id"] == user_id
                 sender_role = "You" if is_current_user else (
-                    "Interested user"
-                    if message["sender_id"] == message["participant_id"]
-                    else "Listing owner"
+                    _chat_person_name(_row_value(conversation, "participant_name"), "Storage seeker")
+                    if conversation["owner_id"] == user_id
+                    else _chat_person_name(_row_value(conversation, "owner_name"), "Storage owner")
                 )
                 try:
                     sent_at = datetime.fromisoformat(message["sent_at"])
@@ -891,14 +1119,21 @@ def show_listing_conversation_chat(connection, user_id, conversation):
 
 def show_request_chat(connection, user_id, request):
     with st.expander("Open chat"):
+        other_name = (
+            _chat_person_name(_row_value(request, "requester_name"), "Storage seeker")
+            if request["owner_id"] == user_id
+            else _chat_person_name(_row_value(request, "owner_name"), "Storage owner")
+        )
+        st.markdown(f"**{request['title']} · {other_name}**")
         messages = get_messages(connection, request["id"], user_id)
         mark_messages_read(connection, request["id"], user_id)
         if messages:
             for message in messages:
                 is_current_user = message["sender_id"] == user_id
                 sender_role = "You" if is_current_user else (
-                    "Renter" if message["sender_id"] == message["requester_id"]
-                    else "Listing owner"
+                    _chat_person_name(_row_value(request, "requester_name"), "Storage seeker")
+                    if message["sender_id"] == message["requester_id"]
+                    else _chat_person_name(_row_value(request, "owner_name"), "Storage owner")
                 )
                 try:
                     sent_at = datetime.fromisoformat(message["sent_at"])
@@ -1108,13 +1343,18 @@ def show_my_listings(connection, owner_id):
 
 def main():
     st.set_page_config(page_title="SpaceShare", page_icon="📦")
-    show_brand_header()
 
     connection = get_connection()
     cookie_manager = get_cookie_manager()
     try:
         expire_pending_rental_requests(connection)
         user_email = restore_logged_in_user(connection, cookie_manager)
+        show_brand_header(
+            show_login_button=not user_email,
+            show_logout_button=bool(user_email),
+            connection=connection,
+            cookie_manager=cookie_manager,
+        )
 
         if user_email:
             st.success(f"Welcome, {user_email}!")
@@ -1132,13 +1372,14 @@ def main():
                 chats_label = "Chats"
                 if unread_count:
                     chats_label += " ①"
-                find_tab, list_tab, my_listings_tab, requests_tab, chats_tab = st.tabs(
+                find_tab, list_tab, my_listings_tab, requests_tab, chats_tab, profile_tab = st.tabs(
                     [
                         "Find storage",
                         "List a space",
                         "My listings",
                         requests_label,
                         chats_label,
+                        "My profile",
                     ]
                 )
                 with find_tab:
@@ -1151,23 +1392,27 @@ def main():
                     show_rental_requests(connection, user["id"])
                 with chats_tab:
                     show_chats(connection, user["id"])
-            if st.button("Log out"):
-                cookie_manager.delete(COOKIE_NAME)
-                del st.session_state["user_email"]
-                st.rerun()
+                with profile_tab:
+                    show_profile(connection, user)
+            show_footer()
             return
 
         search_column, right_column = st.columns((4, 2), gap="large")
         with search_column:
-            st.subheader("Find storage")
-            show_listings(connection)
+            listings = show_listings(connection, include_map=False)
         with right_column:
-            with st.expander("Register or log in"):
+            if st.session_state.get("show_auth_panel"):
                 register_tab, login_tab = st.tabs(["Register", "Log in"])
                 with register_tab:
                     show_registration(connection)
                 with login_tab:
                     show_login(connection, cookie_manager)
+                if st.button("Close", key="close_auth_panel"):
+                    st.session_state["show_auth_panel"] = False
+                    st.rerun()
+            if listings:
+                show_listing_map(listings)
+        show_footer()
     finally:
         connection.close()
 
