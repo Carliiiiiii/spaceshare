@@ -285,6 +285,14 @@ def delete_listing(
     db.delete_listing(connection, listing_id, owner_id)
 
 
+def toggle_listing_favorite(connection, user_id, listing_id):
+    """Save or remove a listing from the authenticated user's shortlist."""
+    if db.get_listing_by_id(connection, listing_id) is None:
+        raise ValueError("Listing not found.")
+    saved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return db.toggle_listing_favorite(connection, user_id, listing_id, saved_at)
+
+
 def create_rental_request(connection, listing_id, requester_id, start_date, end_date):
     listing = db.get_listing_for_request(connection, listing_id)
     if listing is None:
