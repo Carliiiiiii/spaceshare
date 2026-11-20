@@ -8,6 +8,7 @@ from pathlib import Path
 
 import folium
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit_folium import st_folium
 from extra_streamlit_components import CookieManager
 
@@ -1002,6 +1003,22 @@ def show_listing_card(
 
 def show_listing_detail(connection, listing, user_id=None):
     """Render the complete listing information and its contact actions."""
+    components.html(
+        """
+        <script>
+        const scrollToTop = () => {
+            window.parent.scrollTo({top: 0, left: 0, behavior: "instant"});
+            const appView = window.parent.document.querySelector(
+                '[data-testid="stAppViewContainer"]'
+            );
+            if (appView) appView.scrollTo({top: 0, left: 0, behavior: "instant"});
+        };
+        scrollToTop();
+        setTimeout(scrollToTop, 50);
+        </script>
+        """,
+        height=1,
+    )
     if st.button("← Back to listings", key="back_to_listing_results"):
         st.session_state.pop("selected_listing_id", None)
         st.session_state.pop("selected_listing_source", None)
