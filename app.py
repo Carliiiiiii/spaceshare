@@ -1003,18 +1003,24 @@ def show_listing_card(
 
 def show_listing_detail(connection, listing, user_id=None):
     """Render the complete listing information and its contact actions."""
+    st.markdown("<div id='listing-detail-top'></div>", unsafe_allow_html=True)
     components.html(
         """
         <script>
-        const scrollToTop = () => {
-            window.parent.scrollTo({top: 0, left: 0, behavior: "instant"});
-            const appView = window.parent.document.querySelector(
-                '[data-testid="stAppViewContainer"]'
-            );
-            if (appView) appView.scrollTo({top: 0, left: 0, behavior: "instant"});
-        };
-        scrollToTop();
-        setTimeout(scrollToTop, 50);
+        (() => {
+            let attempts = 0;
+            const scrollToDetailTop = () => {
+                const marker = window.parent.document.getElementById(
+                    "listing-detail-top"
+                );
+                if (marker) {
+                    marker.scrollIntoView({block: "start", inline: "nearest"});
+                    return;
+                }
+                if (attempts++ < 20) window.setTimeout(scrollToDetailTop, 50);
+            };
+            scrollToDetailTop();
+        })();
         </script>
         """,
         height=1,
