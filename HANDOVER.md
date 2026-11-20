@@ -2,107 +2,85 @@
 
 ## Current status
 
-The current project is on the `main` branch in the public GitHub repository:
+The current published code is on `main`:
 
-https://github.com/Carliiiiiii/spaceshare
+- Repository: https://github.com/Carliiiiiii/spaceshare
+- App: https://carliiiiiii-spaceshare-app-codexsupabase-storage-luv4lh.streamlit.app/
 
-The app currently supports:
+The interface and documentation are in English. Each account can both search for storage and offer storage.
 
-- account registration, login, and logout with secure Argon2 password hashes;
-- SQLite persistence for accounts, listings, photos, and rental requests;
-- creating storage listings after login, with title, city, description, size,
-  monthly price, availability, minimum rental duration, and an optional end
-  date;
-- optional JPG or PNG photos up to 5 MB, including validation, replacement,
-  removal, and a public placeholder when there is no photo;
-- editing and confirmed deletion of a user's own listings, protected by owner
-  checks in both the business logic and database queries;
-- public browsing before login, with filters for city, minimum size, maximum
-  monthly price, and a desired rental start/end date range;
-- rental requests with `pending`, `accepted`, and `rejected` statuses;
-- a **My requests** area that separates sent requests from requests for a
-  user's listings; only the listing owner can accept or reject a pending
-  request;
-- availability filtering and acceptance checks that prevent overlapping
-  accepted rentals. Pending overlaps remain possible, and a rental may start
-  on the date a previous accepted rental ends.
+## Implemented functionality
 
-Rental periods use half-open intervals: `[start date, end date)`. An accepted
-request blocks an overlapping range, while a request ending on a given date
-does not block a following request starting on that same date.
+### Accounts and profiles
 
-There is no payment, chat, contact-email workflow, listing detail page, or
-final booking/contract workflow yet. A rental request alone is not a payment
-or confirmed booking.
+- Registration, login, logout, and refresh-persistent signed sessions.
+- Argon2 password hashing; passwords are not logged or stored in plain text.
+- Public display name, short profile description, optional profile photo, and verification-request status.
+- Existing accounts without a display name use a role-based fallback in chat: `Storage seeker` or `Storage owner`.
+- E-mail addresses remain private and are not used as public names.
 
-## Local setup and start
+### Listings
 
-From the project directory:
+- Public browsing before login.
+- Listing creation, editing, and confirmed deletion by the owner only.
+- Title, city, description, size, monthly price, availability, minimum stay, optional equipment, optional end date, and optional JPG/PNG photo.
+- Photo validation, replacement and removal, with a placeholder when no photo exists.
+- Public map location, listing detail view, availability calendar, favourites, and advanced filters.
+
+### Rental requests
+
+- A logged-in user can request a period for another user's listing.
+- The requested period must fit the listing availability and minimum stay.
+- The owner can accept or reject pending requests; the requester can cancel a pending request.
+- Accepted requests cannot overlap. Directly adjacent periods are allowed.
+- Pending, rejected, cancelled, and expired requests do not block a period.
+- Owner checks and requester checks are enforced in the backend.
+
+### Chats
+
+- Private listing-question conversations and rental-request conversations.
+- Only the listing owner and the other participant can read or send messages.
+- Messages are stored with sender and timestamp, displayed chronologically, and can be refreshed.
+- The chat overview and open chat show the listing title and the other participant's display name, without exposing e-mail addresses.
+- Unread-message counts are shown in the navigation.
+
+## Data storage
+
+Local development uses SQLite. The database file is `spaceshare.sqlite3` in the project directory and is ignored by Git. Automated tests use temporary databases.
+
+The hosted deployment uses Supabase for accounts, listings, rental requests, photos, profiles, and chat data. Listing photos are stored using the configured Supabase Storage bucket. Streamlit Secrets contain the Supabase URL, service role key, and storage bucket name; these values must never be committed.
+
+Run all relevant SQL migrations from `supabase/migrations/` in the Supabase SQL Editor before deploying schema-dependent changes.
+
+## Local setup and tests
 
 ```bash
 uv sync
 uv run streamlit run app.py
-```
-
-Open the local URL shown by Streamlit, normally:
-
-```text
-http://localhost:8501
-```
-
-The local SQLite database is created as `spaceshare.sqlite3` in the project
-working directory. It is intentionally ignored by Git.
-
-Anonymous users see **Find storage**, **Register**, and **Log in**. Logged-in
-users see **Find storage**, **List a space**, and **My requests**.
-
-## Run the tests
-
-```bash
 uv run pytest -q
 ```
 
-The tests use temporary SQLite databases. They cover accounts, password
-verification, persistence, listing validation, ownership, photos, public
-filters, rental-request validation, request visibility and status permissions,
-and accepted-rental overlap and date-range availability rules.
+The normal local URL is `http://localhost:8501`.
 
-## Manual browser checks
+For a two-account browser test:
 
-1. Without logging in, browse listings and try the city, minimum-size,
-   maximum-price, and desired rental date-range filters.
-2. Register an account, log in, and confirm the three logged-in navigation
-   tabs are visible.
-3. Create a listing without a photo and check that the placeholder is shown.
-4. Create another listing with a JPG or PNG photo smaller than 5 MB.
-5. In **List a space**, replace the photo, save, remove it, and verify the
-   placeholder returns.
-6. Create a second account and verify it cannot edit or delete the first
-   account's listings.
-7. With the second account, send a valid rental request from a listing card.
-   Verify it appears as sent for the requester and incoming for the owner.
-8. As the owner, accept the request. Search an overlapping desired date range
-   and verify the listing is hidden; then try to accept an overlapping pending
-   request and verify it remains pending.
-9. Verify a request beginning on the accepted request's end date can be
-   accepted.
-10. Restart Streamlit and confirm that accounts, listings, photos, and rental
-    requests persist.
+1. Open two separate browser profiles or private windows.
+2. Register one owner and one storage seeker, each with a different name.
+3. The owner creates a listing and optionally uploads a photo.
+4. The seeker finds the listing, sends a rental request, and starts a chat.
+5. The owner checks **My requests**, accepts or rejects the request, and replies in **Chats**.
+6. Confirm that each side sees the other person's name, not their e-mail.
+7. Test an overlapping accepted period and a directly adjacent period.
+8. Restart the app and verify that accounts, listings, photos, requests, and messages remain available.
 
-## Open points
+## Verification before submission
 
-- Add requester cancellation, owner/requester notifications, and a clear
-  booking or contract flow before treating rental requests as reservations.
-- Add a listing detail page and a privacy-conscious contact workflow.
-- The app currently stores photo bytes in SQLite. This is appropriate for the
-  small local project, but a public deployment needs durable database and
-  object-storage services.
-- Before public production use, define backups, HTTPS, data retention, and
-  privacy requirements.
+- Run `uv run pytest -q` on `main`.
+- Confirm that the Streamlit app uses the intended Supabase project and that all required migrations have been applied.
+- Check the Streamlit Secrets configuration without copying secrets into the repository.
+- Review the staged files and confirm that no `*.sqlite3`, `.env`, secrets, tokens, passwords, photos, or other local user data are included.
+- Confirm that the public URL, both team names, and both student numbers are present in `README.md`.
 
-## Repository and data safety
+## Remaining limitations
 
-The repository is public, so do not commit user data or credentials. The
-`.gitignore` excludes `*.sqlite3`, `.env`, virtual environments, caches, and
-Python bytecode. Before every push, inspect the staged file list and confirm
-that no database, secret, token, or credential file is included.
+The project does not implement payments, automated e-mail notifications, identity verification, exact-address sharing, or a legally binding contract. These are outside the current small course-project scope unless the team chooses one as a future extension.
