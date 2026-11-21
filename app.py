@@ -1144,7 +1144,7 @@ def show_listing_detail(connection, listing, user_id=None):
 
 
 def show_availability_calendar(connection, listing):
-    """Show the next three months, with confirmed bookings clearly marked."""
+    """Show a navigable three-month availability window."""
     st.markdown("#### Availability calendar")
     bookings = db.get_confirmed_booking_periods(connection, listing["id"])
     booked_days = set()
@@ -1156,10 +1156,61 @@ def show_availability_calendar(connection, listing):
             current += timedelta(days=1)
     available_from = date.fromisoformat(listing["available_from"])
     available_until = date.fromisoformat(listing["available_until"]) if listing["available_until"] else None
-    first_month = date.today().replace(day=1)
-    for offset in range(3):
-        month = (first_month.month - 1 + offset) % 12 + 1
-        year = first_month.year + (first_month.month - 1 + offset) // 12
+    def month_start(value):
+        return value.replace(day=1)
+
+    def add_months(value, count):
+        index = value.year * 12 + value.month - 1 + count
+        return date(index // 12, index % 12 + 1, 1)
+
+    today_month = month_start(date.today())
+    first_month = max(today_month, month_start(available_from))
+    calendar_key = f"availability_calendar_month_{listing['id']}"
+    selected_month = st.session_state.get(calendar_key, first_month)
+    if isinstance(selected_month, str):
+        selected_month = date.fromisoformat(selected_month)
+    selected_month = month_start(selected_month)
+
+    month_count = 3
+    if available_until:
+        months_until_end = (
+            (available_until.year - first_month.year) * 12
+            + available_until.month - first_month.month
+            + 1
+        )
+        month_count = max(1, min(3, months_until_end))
+        latest_start = add_months(
+            month_start(available_until), -(month_count - 1)
+        )
+        selected_month = min(selected_month, latest_start)
+    selected_month = max(selected_month, first_month)
+    st.session_state[calendar_key] = selected_month
+
+    previous_column, _, next_column = st.columns((1, 2, 1))
+    with previous_column:
+        if st.button(
+            "Previous 3 months",
+            key=f"previous_calendar_{listing['id']}",
+            disabled=selected_month <= first_month,
+        ):
+            st.session_state[calendar_key] = max(
+                first_month, add_months(selected_month, -month_count)
+            )
+            st.rerun()
+    with next_column:
+        next_month = add_months(selected_month, month_count)
+        next_disabled = bool(available_until and next_month > latest_start)
+        if st.button(
+            "Next 3 months",
+            key=f"next_calendar_{listing['id']}",
+            disabled=next_disabled,
+        ):
+            st.session_state[calendar_key] = next_month
+            st.rerun()
+
+    for offset in range(month_count):
+        visible_month = add_months(selected_month, offset)
+        month, year = visible_month.month, visible_month.year
         rows = []
         for week in calendar.monthcalendar(year, month):
             rows.append(" ".join(
