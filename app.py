@@ -996,15 +996,7 @@ def show_listing_card(
                 unsafe_allow_html=True,
             )
 
-        details_column, favorite_column = st.columns((4, 1))
-        with details_column:
-            if st.button(
-                "View details", key=f"{key_prefix}_listing_details_{listing['id']}"
-            ):
-                st.session_state["selected_listing_id"] = listing["id"]
-                st.session_state["selected_listing_source"] = key_prefix
-                st.rerun()
-        with favorite_column:
+        with st.container():
             _show_favorite_button(
                 connection,
                 listing["id"],
@@ -1012,6 +1004,12 @@ def show_listing_card(
                 favorite_listing_ids or set(),
                 key_prefix=key_prefix,
             )
+            if st.button(
+                "View details", key=f"{key_prefix}_listing_details_{listing['id']}"
+            ):
+                st.session_state["selected_listing_id"] = listing["id"]
+                st.session_state["selected_listing_source"] = key_prefix
+                st.rerun()
 
 
 def show_listing_detail(connection, listing, user_id=None):
@@ -1094,6 +1092,9 @@ def show_listing_detail(connection, listing, user_id=None):
                 unsafe_allow_html=True,
             )
 
+            st.markdown("#### Description")
+            st.write(listing["description"])
+
             st.markdown("#### Availability")
             st.markdown(
                 f"""
@@ -1111,8 +1112,6 @@ def show_listing_detail(connection, listing, user_id=None):
                 unsafe_allow_html=True,
             )
             show_availability_calendar(connection, listing)
-            st.markdown("#### Description")
-            st.write(listing["description"])
 
     with contact_column:
         with st.container(border=True):
