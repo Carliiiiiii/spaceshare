@@ -155,6 +155,21 @@ def validate_photo(
     return photo_data, mime_types[image_format]
 
 
+def validate_gallery_photos(photos):
+    """Validate up to eight uploaded gallery images."""
+    if len(photos) > 8:
+        raise ValueError("A listing can have at most 8 photos.")
+    return [validate_photo(data, mime_type) for data, mime_type in photos]
+
+
+def replace_listing_gallery(connection, listing_id, owner_id, photos, cover_index=0):
+    """Validate and store a gallery with one selected cover image."""
+    validated = validate_gallery_photos(photos)
+    if validated and not 0 <= cover_index < len(validated):
+        raise ValueError("Choose a valid cover photo.")
+    db.replace_listing_images(connection, listing_id, owner_id, [(data, mime_type, index == cover_index) for index, (data, mime_type) in enumerate(validated)])
+
+
 def validate_public_location(
     public_latitude: Optional[float], public_longitude: Optional[float]
 ) -> tuple:
