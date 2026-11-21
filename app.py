@@ -580,7 +580,7 @@ def show_listing_form(connection, user_email):
         st.error("The logged-in account could not be found.")
         return
 
-    st.subheader("Create a storage listing")
+    st.subheader("Create a new storage listing")
     location_choice = st.radio(
         "Show an approximate location on the public map?",
         ("No, do not show a pin", "Yes, add a public pin"),
