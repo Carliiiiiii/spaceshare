@@ -1510,8 +1510,15 @@ def show_request_chat(connection, user_id, request):
 
 def show_my_listings(connection, owner_id, user_email):
     st.subheader("My listings")
-    st.markdown("#### Add a new listing")
-    show_listing_form(connection, user_email)
+    if st.button("Add a new listing", type="primary", key="open_new_listing_form"):
+        st.session_state["show_new_listing_form"] = True
+        st.rerun()
+    if st.session_state.get("show_new_listing_form"):
+        st.markdown("#### New listing")
+        show_listing_form(connection, user_email)
+        if st.button("Close", key="close_new_listing_form"):
+            st.session_state["show_new_listing_form"] = False
+            st.rerun()
     st.divider()
     st.markdown("#### Your listings")
     listings = db.get_listings_by_owner(connection, owner_id)
