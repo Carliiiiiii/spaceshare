@@ -40,6 +40,7 @@ from logic import (
     verify_user_password,
     update_rental_request_status,
     validate_public_location,
+    validate_photo,
 )
 
 
@@ -610,13 +611,15 @@ def show_listing_form(connection, user_email):
         price = st.number_input("Price per month in €", min_value=0.0, step=1.0)
         available_from = st.date_input("Available from")
         available_until = st.date_input("Available until (optional)", value=None)
-        uploaded_photo = st.file_uploader(
-            "Photo (optional — drag and drop or browse; JPG/PNG, max 5 MB)",
+        uploaded_photos = st.file_uploader(
+            "Photos (optional — drag and drop or browse; JPG/PNG, max 5 MB each)",
             type=["jpg", "jpeg", "png"],
             help="Drag and drop one image here or choose it from your device.",
             max_upload_size=5,
             width="stretch",
+            accept_multiple_files=True,
         )
+        cover_index = st.selectbox("Cover photo", range(len(uploaded_photos)), format_func=lambda index: f"Photo {index + 1}") if uploaded_photos else 0
         minimum_days = st.number_input(
             "Minimum rental duration in days", min_value=0, step=1
         )
@@ -627,7 +630,7 @@ def show_listing_form(connection, user_email):
             description_with_features = _description_with_features(
                 description, selected_features
             )
-            create_listing(
+            listing_id = create_listing(
                 connection,
                 user["id"],
                 title,
@@ -638,11 +641,17 @@ def show_listing_form(connection, user_email):
                 available_from.isoformat(),
                 minimum_days,
                 available_until.isoformat() if available_until else None,
-                uploaded_photo.getvalue() if uploaded_photo else None,
-                uploaded_photo.type if uploaded_photo else None,
+                uploaded_photos[cover_index].getvalue() if uploaded_photos else None,
+                uploaded_photos[cover_index].type if uploaded_photos else None,
                 public_latitude=public_latitude,
                 public_longitude=public_longitude,
             )
+            if uploaded_photos:
+                images = []
+                for photo in uploaded_photos:
+                    data, mime_type = validate_photo(photo.getvalue(), photo.type)
+                    images.append((data, mime_type))
+                db.create_listing_images(connection, listing_id, images, cover_index)
         except ValueError as error:
             st.error(str(error))
         else:
@@ -923,13 +932,17 @@ def show_listing_card(
     key_prefix,
 ):
     """Render one compact listing card for the browse view."""
-    photo_url = listing["photo_url"]
+    gallery = db.get_listing_images(connection, listing["id"])
+    cover = next((image for image in gallery if image["is_cover"]), gallery[0] if gallery else None)
+    photo_url = _row_value(cover, "image_url") if cover else listing["photo_url"]
     photo_data = listing["photo_data"]
     with st.container(border=True):
         media_column, details_column = st.columns((1, 2), gap="large")
         with media_column:
             if photo_url:
                 st.image(photo_url)
+            elif cover and _row_value(cover, "image_data"):
+                st.image(_row_value(cover, "image_data"))
             elif photo_data:
                 st.image(photo_data)
             else:
@@ -1033,18 +1046,29 @@ def show_listing_detail(connection, listing, user_id=None):
     information_column, contact_column = st.columns((2, 1), gap="large")
     with information_column:
         with st.container(border=True):
-            photo_url = listing["photo_url"]
+            gallery = db.get_listing_images(connection, listing["id"])
+            cover = next((image for image in gallery if image["is_cover"]), gallery[0] if gallery else None)
+            photo_url = _row_value(cover, "image_url") if cover else listing["photo_url"]
             photo_data = listing["photo_data"]
             media_column, details_column = st.columns((1, 2), gap="large")
             with media_column:
                 if photo_url:
                     st.image(photo_url)
+                elif cover and _row_value(cover, "image_data"):
+                    st.image(_row_value(cover, "image_data"))
                 elif photo_data:
                     st.image(photo_data)
                 else:
                     st.info("No photo available.")
             with details_column:
                 st.subheader(listing["title"])
+
+            if gallery:
+                st.markdown("#### Photo gallery")
+                gallery_columns = st.columns(min(3, len(gallery)))
+                for index, image in enumerate(gallery):
+                    with gallery_columns[index % len(gallery_columns)]:
+                        st.image(_row_value(image, "image_url") or _row_value(image, "image_data"), caption="Cover photo" if image["is_cover"] else f"Photo {index + 1}")
 
             st.markdown(
                 f"""

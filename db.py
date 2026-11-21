@@ -143,6 +143,20 @@ def connect(database_path: Path) -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS listing_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id INTEGER NOT NULL,
+            image_data BLOB,
+            image_mime_type TEXT NOT NULL,
+            image_url TEXT,
+            position INTEGER NOT NULL DEFAULT 0,
+            is_cover INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (listing_id) REFERENCES listings (id) ON DELETE CASCADE
+        )
+        """
+    )
     listing_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(listings)")
     }
@@ -549,6 +563,64 @@ def get_listing_by_id(connection, listing_id):
         """,
         (listing_id,),
     ).fetchone()
+
+
+def get_listing_images(connection, listing_id):
+    """Return gallery images in their public display order."""
+    if isinstance(connection, SupabaseConnection):
+        response = (
+            connection.client.table("listing_images")
+            .select("id,image_url,position,is_cover")
+            .eq("listing_id", listing_id)
+            .order("position")
+            .execute()
+        )
+        return response.data or []
+    return connection.execute(
+        "SELECT id, image_data, image_mime_type, image_url, position, is_cover FROM listing_images WHERE listing_id = ? ORDER BY position, id",
+        (listing_id,),
+    ).fetchall()
+
+
+def replace_listing_images(connection, listing_id, owner_id, images):
+    """Replace a listing gallery; each item is (data, mime_type, is_cover)."""
+    if isinstance(connection, SupabaseConnection):
+        listing = connection.client.table("listings").select("id").eq("id", listing_id).eq("owner_id", owner_id).execute().data or []
+        if not listing:
+            raise PermissionError("You do not own this listing.")
+        old = get_listing_images(connection, listing_id)
+        for image in old:
+            if image.get("image_path"):
+                connection.client.storage.from_(connection.settings.storage_bucket).remove([image["image_path"]])
+        connection.client.table("listing_images").delete().eq("listing_id", listing_id).execute()
+        rows = []
+        for position, (data, mime_type, is_cover) in enumerate(images):
+            path = f"listings/{listing_id}/gallery/{uuid.uuid4().hex}"
+            connection.client.storage.from_(connection.settings.storage_bucket).upload(path, data, {"content-type": mime_type, "upsert": "true"})
+            rows.append({"listing_id": listing_id, "image_path": path, "image_url": connection.client.storage.from_(connection.settings.storage_bucket).get_public_url(path), "position": position, "is_cover": is_cover})
+        if rows:
+            connection.client.table("listing_images").insert(rows).execute()
+        return
+    if connection.execute("SELECT 1 FROM listings WHERE id = ? AND owner_id = ?", (listing_id, owner_id)).fetchone() is None:
+        raise PermissionError("You do not own this listing.")
+    connection.execute("DELETE FROM listing_images WHERE listing_id = ?", (listing_id,))
+    connection.executemany("INSERT INTO listing_images (listing_id, image_data, image_mime_type, position, is_cover) VALUES (?, ?, ?, ?, ?)", [(listing_id, data, mime_type, position, int(is_cover)) for position, (data, mime_type, is_cover) in enumerate(images)])
+    connection.commit()
+
+
+def create_listing_images(connection, listing_id, images, cover_index=0):
+    """Store images for a newly created listing without an owner recheck."""
+    if isinstance(connection, SupabaseConnection):
+        rows = []
+        for position, (data, mime_type) in enumerate(images):
+            path = f"listings/{listing_id}/gallery/{uuid.uuid4().hex}"
+            connection.client.storage.from_(connection.settings.storage_bucket).upload(path, data, {"content-type": mime_type, "upsert": "true"})
+            rows.append({"listing_id": listing_id, "image_path": path, "image_url": connection.client.storage.from_(connection.settings.storage_bucket).get_public_url(path), "position": position, "is_cover": position == cover_index})
+        if rows:
+            connection.client.table("listing_images").insert(rows).execute()
+        return
+    connection.executemany("INSERT INTO listing_images (listing_id, image_data, image_mime_type, position, is_cover) VALUES (?, ?, ?, ?, ?)", [(listing_id, data, mime_type, position, int(position == cover_index)) for position, (data, mime_type) in enumerate(images)])
+    connection.commit()
 
 
 def get_favorite_listing_ids(connection, user_id) -> list[int]:
