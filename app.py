@@ -1508,8 +1508,12 @@ def show_request_chat(connection, user_id, request):
             st.rerun()
 
 
-def show_my_listings(connection, owner_id):
+def show_my_listings(connection, owner_id, user_email):
     st.subheader("My listings")
+    st.markdown("#### Add a new listing")
+    show_listing_form(connection, user_email)
+    st.divider()
+    st.markdown("#### Your listings")
     listings = db.get_listings_by_owner(connection, owner_id)
     if not listings:
         st.info("You have no listings yet.")
@@ -1724,10 +1728,9 @@ def main():
                 chats_label = "Chats"
                 if unread_count:
                     chats_label += " ①"
-                find_tab, list_tab, my_listings_tab, saved_tab, requests_tab, chats_tab, profile_tab = st.tabs(
+                find_tab, my_listings_tab, saved_tab, requests_tab, chats_tab, profile_tab = st.tabs(
                     [
                         "Find storage",
-                        "List a space",
                         "My listings",
                         "♥ Saved",
                         requests_label,
@@ -1737,10 +1740,8 @@ def main():
                 )
                 with find_tab:
                     show_listings(connection, user_id=user["id"])
-                with list_tab:
-                    show_listing_form(connection, user_email)
                 with my_listings_tab:
-                    show_my_listings(connection, user["id"])
+                    show_my_listings(connection, user["id"], user_email)
                 with saved_tab:
                     show_saved_listings(connection, user["id"])
                 with requests_tab:
