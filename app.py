@@ -1514,7 +1514,6 @@ def show_my_listings(connection, owner_id, user_email):
         st.session_state["show_new_listing_form"] = True
         st.rerun()
     if st.session_state.get("show_new_listing_form"):
-        st.markdown("#### New listing")
         show_listing_form(connection, user_email)
         if st.button("Close", key="close_new_listing_form"):
             st.session_state["show_new_listing_form"] = False
