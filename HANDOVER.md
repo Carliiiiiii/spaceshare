@@ -81,6 +81,18 @@ For a two-account browser test:
 - Review the staged files and confirm that no `*.sqlite3`, `.env`, secrets, tokens, passwords, photos, or other local user data are included.
 - Confirm that the public URL, both team names, and both student numbers are present in `README.md`.
 
+## Privacy and security notes
+
+The public repository does not contain database files, passwords, API keys, or Streamlit secrets. Passwords are stored as Argon2 password hashes and are never stored as plain text.
+
+The hosted app reads the Supabase service-role key only from Streamlit Secrets. The key is used server-side and is not stored in GitHub or exposed in the application interface.
+
+Ownership checks for listings and rental requests, as well as participant checks for private chats, are performed in the backend before database operations.
+
+Listing photos are stored in the public `listing-photos` Supabase Storage bucket. They must therefore be treated as publicly accessible listing media. Users should not upload real addresses, identity documents, private documents, or other sensitive personal information.
+
+The public demonstration uses test accounts. No real personal data should be used for testing.
+
 ## Remaining limitations
 
 The project does not implement payments, automated e-mail notifications, identity verification, exact-address sharing, or a legally binding contract. These are outside the current small course-project scope unless the team chooses one as a future extension.
