@@ -289,7 +289,7 @@ def show_brand_header(
         header_label = "Register & Log in" if show_login_button else "Log out"
         header_action = "login" if show_login_button else "logout"
         action_markup = (
-            f'<a class="spaceshare-header-action" href="?header_action={header_action}">'
+            f'<a class="spaceshare-header-action" href="?header_action={header_action}" target="_self">'
             f"{html.escape(header_label)}</a>"
         )
     else:
