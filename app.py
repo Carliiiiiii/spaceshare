@@ -233,7 +233,22 @@ def show_brand_header(
                 st.rerun()
 
 
-def show_registration(connection):
+def _start_user_session(cookie_manager, email):
+    """Store the logged-in user in state and in the signed session cookie."""
+    normalized_email = email.strip().lower()
+    st.session_state.pop("logged_out", None)
+    st.session_state["user_email"] = normalized_email
+    cookie_manager.set(
+        COOKIE_NAME,
+        create_session(normalized_email, st.secrets),
+        key="set_session_cookie",
+        max_age=SESSION_TTL_SECONDS,
+        secure=False,
+        same_site="lax",
+    )
+
+
+def show_registration(connection, cookie_manager):
     st.subheader("Create an account")
     with st.form("registration_form"):
         display_name = st.text_input("Name", key="registration_display_name")
@@ -249,7 +264,8 @@ def show_registration(connection):
         except ValueError as error:
             st.error(str(error))
         else:
-            st.success("Account created. You can now log in.")
+            _start_user_session(cookie_manager, email)
+            st.rerun()
 
 
 def show_profile(connection, user):
@@ -324,19 +340,8 @@ def show_login(connection, cookie_manager):
             st.error(str(error))
         else:
             if valid_password:
-                normalized_email = email.strip().lower()
-                st.session_state.pop("logged_out", None)
-                st.session_state["user_email"] = normalized_email
-                cookie_manager.set(
-                    COOKIE_NAME,
-                    create_session(normalized_email, st.secrets),
-                    key="set_session_cookie",
-                    max_age=SESSION_TTL_SECONDS,
-                    secure=False,
-                    same_site="lax",
-                )
-                st.success("Logged in. Refresh the page to continue.")
-                st.stop()
+                _start_user_session(cookie_manager, email)
+                st.rerun()
             else:
                 st.error("Invalid email or password.")
 
@@ -1816,7 +1821,7 @@ def main():
             if st.session_state.get("show_auth_panel"):
                 register_tab, login_tab = st.tabs(["Register", "Log in"])
                 with register_tab:
-                    show_registration(connection)
+                    show_registration(connection, cookie_manager)
                 with login_tab:
                     show_login(connection, cookie_manager)
                 if st.button("Close", key="close_auth_panel"):
