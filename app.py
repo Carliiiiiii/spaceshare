@@ -1,5 +1,6 @@
 """Streamlit interface for browsing and managing SpaceShare listings."""
 
+import base64
 import calendar
 import html
 from datetime import date, datetime, timedelta
@@ -47,7 +48,9 @@ from logic import (
 
 
 DATABASE_PATH = Path("spaceshare.sqlite3")
-LOGO_PATH = Path(__file__).parent / "assets" / "spaceshare-logo.svg"
+HEADER_BANNER_PATH = (
+    Path(__file__).parent / "assets" / "spaceshare-header-banner.png"
+)
 DEFAULT_MAP_CENTER = (38.7223, -9.1393)
 LISTING_SORT_OPTIONS = (
     "Newest",
@@ -126,6 +129,28 @@ def restore_logged_in_user(connection, cookie_manager):
     return email
 
 
+def _header_banner_data_uri():
+    """Return the original banner artwork as an inline PNG for the header."""
+    encoded_banner = base64.b64encode(HEADER_BANNER_PATH.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded_banner}"
+
+
+def _handle_header_action(cookie_manager):
+    """Apply the action selected through the full-width branded header."""
+    action = st.query_params.get("header_action")
+    if action not in {"login", "logout"}:
+        return
+
+    st.query_params.clear()
+    if action == "logout":
+        cookie_manager.delete(COOKIE_NAME)
+        st.session_state.pop("user_email", None)
+        st.session_state["logged_out"] = True
+    else:
+        st.session_state["show_auth_panel"] = True
+    st.rerun()
+
+
 def show_brand_header(
     show_login_button=False,
     show_logout_button=False,
@@ -136,7 +161,6 @@ def show_brand_header(
     st.markdown(
         """
         <style>
-        .spaceshare-logo { width: min(100%, 260px); height: auto; margin: 0 0 0.4rem 0; }
         [data-testid="stAppViewContainer"] { background: #F8FCFE; }
         [data-testid="stHeader"] { background: #F8FCFE; }
         [data-testid="stMainBlockContainer"] { max-width: 1800px; padding-left: 2rem; padding-right: 2rem; }
@@ -147,17 +171,60 @@ def show_brand_header(
         .listing-price { color: #D95F1E; font-size: 1.2rem; font-weight: 700; }
         div.stButton > button[kind="primary"], div.stFormSubmitButton > button { background: #F77B32; color: white; border: 0; }
         div.stButton > button[kind="primary"]:hover, div.stFormSubmitButton > button:hover { background: #D95F1E; color: white; }
-        .spaceshare-header { align-items: center; }
-        .spaceshare-page-banner {
-            background: #FFF0E6;
-            border-left: 0.35rem solid #F77B32;
-            color: #17324D;
-            font-size: clamp(1.5rem, 3vw, 2.4rem);
-            font-weight: 800;
-            letter-spacing: 0.01em;
-            margin: 1.15rem 0 1.25rem;
-            padding: 0.25rem 1.25rem;
-            text-align: left;
+        .spaceshare-header-banner {
+            background: #FFFFFF;
+            border-radius: 1.35rem;
+            box-shadow: 0 0.7rem 1.8rem rgba(23, 50, 77, 0.09);
+            isolation: isolate;
+            margin: 0.15rem 0 1.35rem;
+            overflow: hidden;
+            position: relative;
+            width: 100%;
+        }
+        .spaceshare-header-banner::after {
+            box-shadow: inset 0 0 1.65rem rgba(248, 252, 254, 0.48);
+            content: "";
+            inset: 0;
+            pointer-events: none;
+            position: absolute;
+            z-index: 1;
+        }
+        .spaceshare-header-banner img {
+            display: block;
+            height: auto;
+            image-rendering: auto;
+            max-width: none;
+            width: 100%;
+        }
+        .spaceshare-header-banner-inner {
+            -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 2.2%, #000 97.8%, transparent 100%);
+            mask-image: linear-gradient(to right, transparent 0%, #000 2.2%, #000 97.8%, transparent 100%);
+        }
+        .spaceshare-header-action {
+            background: rgba(247, 123, 50, 0.97);
+            border: 1px solid rgba(255, 255, 255, 0.85);
+            border-radius: 999px;
+            box-shadow: 0 0.3rem 0.85rem rgba(23, 50, 77, 0.16);
+            color: #FFFFFF !important;
+            font-size: 0.9rem;
+            font-weight: 700;
+            line-height: 1;
+            padding: 0.72rem 1rem;
+            position: absolute;
+            right: 1.2rem;
+            text-decoration: none !important;
+            top: 1rem;
+            transition: background 150ms ease, transform 150ms ease;
+            z-index: 2;
+        }
+        .spaceshare-header-action:hover {
+            background: #D95F1E;
+            color: #FFFFFF !important;
+            transform: translateY(-1px);
+        }
+        @media (max-width: 700px) {
+            .spaceshare-header-banner { border-radius: 1rem; }
+            .spaceshare-header-action { font-size: 0.75rem; padding: 0.55rem 0.75rem; right: 0.65rem; top: 0.55rem; }
         }
         .detail-price {
             color: #D95F1E;
@@ -218,21 +285,27 @@ def show_brand_header(
         """,
         unsafe_allow_html=True,
     )
-    logo_column, _, action_column = st.columns((3, 6, 1), gap="small")
-    with logo_column:
-        st.image(str(LOGO_PATH), width=260)
     if show_login_button or show_logout_button:
-        with action_column:
-            header_label = "Register & Log in" if show_login_button else "Log out"
-            header_key = "header_login_button" if show_login_button else "header_logout_button"
-            if st.button(header_label, type="primary", key=header_key):
-                if show_logout_button:
-                    cookie_manager.delete(COOKIE_NAME)
-                    st.session_state.pop("user_email", None)
-                    st.session_state["logged_out"] = True
-                    st.rerun()
-                st.session_state["show_auth_panel"] = True
-                st.rerun()
+        header_label = "Register & Log in" if show_login_button else "Log out"
+        header_action = "login" if show_login_button else "logout"
+        action_markup = (
+            f'<a class="spaceshare-header-action" href="?header_action={header_action}">'
+            f"{html.escape(header_label)}</a>"
+        )
+    else:
+        action_markup = ""
+
+    st.markdown(
+        f"""
+        <div class="spaceshare-header-banner">
+            <div class="spaceshare-header-banner-inner">
+                <img src="{_header_banner_data_uri()}" alt="SpaceShare — Storage space, simply found.">
+            </div>
+            {action_markup}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _start_user_session(cookie_manager, email):
@@ -776,10 +849,6 @@ def show_listings(connection, *, include_map=True, user_id=None):
             (listing["public_latitude"], listing["public_longitude"])
         )
 
-    st.markdown(
-        '<div class="spaceshare-page-banner">Find &amp; Rent Storage</div>',
-        unsafe_allow_html=True,
-    )
     st.subheader("Available storage listings")
     with st.container(border=True):
         filter_columns = st.columns(4)
@@ -1808,6 +1877,7 @@ def main():
     connection = get_connection()
     cookie_manager = get_cookie_manager()
     try:
+        _handle_header_action(cookie_manager)
         expire_pending_rental_requests(connection)
         user_email = restore_logged_in_user(connection, cookie_manager)
         show_brand_header(
