@@ -18,6 +18,7 @@ from supabase_backend import create_supabase_client
 from logic import (
     PUBLIC_LOCATION_DECIMAL_PLACES,
     cancel_rental_request,
+    block_user,
     create_rental_request,
     create_listing,
     delete_listing,
@@ -30,6 +31,7 @@ from logic import (
     mark_listing_conversation_messages_read,
     mark_messages_read,
     register_user,
+    report_content,
     update_display_name,
     update_user_profile,
     send_listing_conversation_message,
@@ -233,7 +235,22 @@ def show_brand_header(
                 st.rerun()
 
 
-def show_registration(connection):
+def _start_user_session(cookie_manager, email):
+    """Store the logged-in user in state and in the signed session cookie."""
+    normalized_email = email.strip().lower()
+    st.session_state.pop("logged_out", None)
+    st.session_state["user_email"] = normalized_email
+    cookie_manager.set(
+        COOKIE_NAME,
+        create_session(normalized_email, st.secrets),
+        key="set_session_cookie",
+        max_age=SESSION_TTL_SECONDS,
+        secure=False,
+        same_site="lax",
+    )
+
+
+def show_registration(connection, cookie_manager):
     st.subheader("Create an account")
     with st.form("registration_form"):
         display_name = st.text_input("Name", key="registration_display_name")
@@ -249,7 +266,8 @@ def show_registration(connection):
         except ValueError as error:
             st.error(str(error))
         else:
-            st.success("Account created. You can now log in.")
+            _start_user_session(cookie_manager, email)
+            st.rerun()
 
 
 def show_profile(connection, user):
@@ -324,19 +342,8 @@ def show_login(connection, cookie_manager):
             st.error(str(error))
         else:
             if valid_password:
-                normalized_email = email.strip().lower()
-                st.session_state.pop("logged_out", None)
-                st.session_state["user_email"] = normalized_email
-                cookie_manager.set(
-                    COOKIE_NAME,
-                    create_session(normalized_email, st.secrets),
-                    key="set_session_cookie",
-                    max_age=SESSION_TTL_SECONDS,
-                    secure=False,
-                    same_site="lax",
-                )
-                st.success("Logged in. Refresh the page to continue.")
-                st.stop()
+                _start_user_session(cookie_manager, email)
+                st.rerun()
             else:
                 st.error("Invalid email or password.")
 
@@ -1282,6 +1289,28 @@ def show_listing_contact_actions(connection, listing):
         st.caption("This is your listing. You can edit it in My listings.")
         return
 
+    owner_id = db._get_listing_owner_id(connection, listing["id"])
+    safety_columns = st.columns(2)
+    with safety_columns[0]:
+        if st.button("Block user", key=f"block_listing_owner_{listing['id']}"):
+            try:
+                block_user(connection, user["id"], owner_id)
+            except (ValueError, PermissionError) as error:
+                st.error(str(error))
+            else:
+                st.success("User blocked. You can no longer contact each other.")
+                st.rerun()
+    with safety_columns[1]:
+        with st.popover("Report listing"):
+            report_reason = st.text_area("Reason", max_chars=500, key=f"report_listing_reason_{listing['id']}")
+            if st.button("Send report", key=f"report_listing_{listing['id']}"):
+                try:
+                    report_content(connection, user["id"], "listing", listing["id"], report_reason)
+                except ValueError as error:
+                    st.error(str(error))
+                else:
+                    st.success("Thanks. Your report was saved for review.")
+
     question_form_key = f"listing_question_open_{listing['id']}"
     if st.button("Chat about this listing", key=f"chat_listing_{listing['id']}"):
         st.session_state[question_form_key] = True
@@ -1482,6 +1511,16 @@ def show_listing_conversation_chat(connection, user_id, conversation):
                     st.markdown(f"**{sender_role}**")
                     st.caption(formatted_time)
                     st.write(message["message"])
+                if message["sender_id"] != user_id:
+                    with st.popover("Report message", use_container_width=False):
+                        reason = st.text_area("Reason", max_chars=500, key=f"report_listing_message_reason_{message['id']}")
+                        if st.button("Send report", key=f"report_listing_message_{message['id']}"):
+                            try:
+                                report_content(connection, user_id, "message", message["id"], reason)
+                            except ValueError as error:
+                                st.error(str(error))
+                            else:
+                                st.success("Message reported.")
         else:
             st.info("No messages yet.")
 
@@ -1536,6 +1575,16 @@ def show_request_chat(connection, user_id, request):
                     st.markdown(f"**{sender_role}**")
                     st.caption(formatted_time)
                     st.write(message["message"])
+                if message["sender_id"] != user_id:
+                    with st.popover("Report message", use_container_width=False):
+                        reason = st.text_area("Reason", max_chars=500, key=f"report_request_message_reason_{message['id']}")
+                        if st.button("Send report", key=f"report_request_message_{message['id']}"):
+                            try:
+                                report_content(connection, user_id, "message", message["id"], reason)
+                            except ValueError as error:
+                                st.error(str(error))
+                            else:
+                                st.success("Message reported.")
         else:
             st.info("No messages yet.")
 
@@ -1816,7 +1865,7 @@ def main():
             if st.session_state.get("show_auth_panel"):
                 register_tab, login_tab = st.tabs(["Register", "Log in"])
                 with register_tab:
-                    show_registration(connection)
+                    show_registration(connection, cookie_manager)
                 with login_tab:
                     show_login(connection, cookie_manager)
                 if st.button("Close", key="close_auth_panel"):

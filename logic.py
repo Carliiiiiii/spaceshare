@@ -16,6 +16,8 @@ import db
 password_hasher = PasswordHasher()
 MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024
 MAX_MESSAGE_LENGTH = 1000
+MESSAGE_LIMIT = 10
+MESSAGE_LIMIT_WINDOW_MINUTES = 5
 PUBLIC_LOCATION_DECIMAL_PLACES = 2
 RENTAL_REQUEST_EXPIRY_DAYS = db.RENTAL_REQUEST_EXPIRY_DAYS
 
@@ -378,6 +380,7 @@ def send_message(connection, request_id, sender_id, message):
     """Validate and send a message as a participant in a request."""
     cleaned_message = _validated_message_text(message)
     sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _check_message_rate_limit(connection, sender_id)
     return db.create_message(
         connection, request_id, sender_id, cleaned_message, sent_at
     )
@@ -400,6 +403,7 @@ def send_listing_conversation_message(connection, conversation_id, sender_id, me
     """Validate and send a direct listing-chat message."""
     cleaned_message = _validated_message_text(message)
     sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _check_message_rate_limit(connection, sender_id)
     return db.create_listing_conversation_message(
         connection, conversation_id, sender_id, cleaned_message, sent_at
     )
@@ -421,6 +425,26 @@ def _validated_message_text(message):
     if len(cleaned_message) > MAX_MESSAGE_LENGTH:
         raise ValueError("Message must be 1000 characters or fewer.")
     return cleaned_message
+
+
+def _check_message_rate_limit(connection, user_id):
+    since = (datetime.now(timezone.utc) - timedelta(minutes=MESSAGE_LIMIT_WINDOW_MINUTES)).isoformat(timespec="seconds")
+    if db.count_recent_messages(connection, user_id, since) >= MESSAGE_LIMIT:
+        raise ValueError("Too many messages. Please wait a few minutes before sending more.")
+
+
+def block_user(connection, blocker_id, blocked_id):
+    if blocker_id == blocked_id:
+        raise ValueError("You cannot block yourself.")
+    db.block_user(connection, blocker_id, blocked_id, datetime.now(timezone.utc).isoformat(timespec="seconds"))
+
+
+def report_content(connection, reporter_id, target_type, target_id, reason):
+    if target_type not in {"listing", "message"}:
+        raise ValueError("Invalid report type.")
+    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 500:
+        raise ValueError("Please provide a report reason of up to 500 characters.")
+    db.create_safety_report(connection, reporter_id, target_type, target_id, reason.strip(), datetime.now(timezone.utc).isoformat(timespec="seconds"))
 
 
 def get_listing_conversations(connection, user_id):

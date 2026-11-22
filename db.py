@@ -144,6 +144,22 @@ def connect(database_path: Path) -> sqlite3.Connection:
         """
     )
     connection.execute(
+        """CREATE TABLE IF NOT EXISTS user_blocks (
+            blocker_id INTEGER NOT NULL, blocked_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL, PRIMARY KEY (blocker_id, blocked_id),
+            FOREIGN KEY (blocker_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (blocked_id) REFERENCES users(id) ON DELETE CASCADE
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS safety_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, reporter_id INTEGER NOT NULL,
+            target_type TEXT NOT NULL, target_id INTEGER NOT NULL,
+            reason TEXT NOT NULL, created_at TEXT NOT NULL,
+            FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE
+        )"""
+    )
+    connection.execute(
         """
         CREATE TABLE IF NOT EXISTS listing_images (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -260,6 +276,37 @@ def get_public_user_profile(connection, user_id):
         "SELECT id, display_name, bio, verification_status, profile_photo_data FROM users WHERE id = ?",
         (user_id,),
     ).fetchone()
+
+
+def block_user(connection, blocker_id, blocked_id, created_at):
+    if isinstance(connection, SupabaseConnection):
+        connection.client.table("user_blocks").upsert({"blocker_id": blocker_id, "blocked_id": blocked_id, "created_at": created_at}).execute()
+        return
+    connection.execute("INSERT OR IGNORE INTO user_blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)", (blocker_id, blocked_id, created_at))
+    connection.commit()
+
+
+def users_are_blocked(connection, first_user_id, second_user_id):
+    if isinstance(connection, SupabaseConnection):
+        rows = connection.client.table("user_blocks").select("blocker_id").or_(f"and(blocker_id.eq.{first_user_id},blocked_id.eq.{second_user_id}),and(blocker_id.eq.{second_user_id},blocked_id.eq.{first_user_id})").execute().data or []
+        return bool(rows)
+    return connection.execute("SELECT 1 FROM user_blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)", (first_user_id, second_user_id, second_user_id, first_user_id)).fetchone() is not None
+
+
+def create_safety_report(connection, reporter_id, target_type, target_id, reason, created_at):
+    if isinstance(connection, SupabaseConnection):
+        connection.client.table("safety_reports").insert({"reporter_id": reporter_id, "target_type": target_type, "target_id": target_id, "reason": reason, "created_at": created_at}).execute()
+        return
+    connection.execute("INSERT INTO safety_reports (reporter_id,target_type,target_id,reason,created_at) VALUES (?,?,?,?,?)", (reporter_id,target_type,target_id,reason,created_at))
+    connection.commit()
+
+
+def count_recent_messages(connection, sender_id, since):
+    if isinstance(connection, SupabaseConnection):
+        direct = connection.client.table("messages").select("id", count="exact").eq("sender_id", sender_id).gt("sent_at", since).execute()
+        listing = connection.client.table("listing_conversation_messages").select("id", count="exact").eq("sender_id", sender_id).gt("sent_at", since).execute()
+        return (direct.count or 0) + (listing.count or 0)
+    return connection.execute("SELECT (SELECT count(*) FROM messages WHERE sender_id=? AND sent_at>?) + (SELECT count(*) FROM listing_conversation_messages WHERE sender_id=? AND sent_at>?)", (sender_id,since,sender_id,since)).fetchone()[0]
 
 
 def update_user_display_name(connection, user_id, display_name: str) -> None:
