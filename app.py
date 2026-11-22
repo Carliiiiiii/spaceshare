@@ -402,7 +402,7 @@ def show_footer():
 
 
 def show_authenticated_navigation(requests_label, chats_label):
-    """Keep the signed-in section in the URL so browser refresh preserves it."""
+    """Keep the active signed-in section after a browser refresh."""
     sections = [
         ("find", "Find storage"),
         ("listings", "My listings"),
@@ -415,6 +415,37 @@ def show_authenticated_navigation(requests_label, chats_label):
     requested_section = st.query_params.get("section", "find")
     if requested_section not in section_keys:
         requested_section = "find"
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stRadio"] > label { display: none; }
+        div[data-testid="stRadio"] > div {
+            flex-direction: row;
+            gap: 0.35rem;
+            border-bottom: 1px solid #D7E7EF;
+        }
+        div[data-testid="stRadio"] div[role="radiogroup"] { gap: 0.35rem; }
+        div[data-testid="stRadio"] div[role="radiogroup"] label {
+            border-bottom: 0.18rem solid transparent;
+            color: #17324D;
+            cursor: pointer;
+            font-weight: 600;
+            padding: 0.45rem 0.55rem 0.55rem;
+        }
+        div[data-testid="stRadio"] div[role="radiogroup"] label:hover {
+            color: #D95F1E;
+        }
+        div[data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) {
+            border-bottom-color: #F77B32;
+            color: #D95F1E;
+        }
+        div[data-testid="stRadio"] div[role="radiogroup"] label > div:first-child {
+            display: none;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     selected_section = st.radio(
         "Navigate",
         section_keys,
