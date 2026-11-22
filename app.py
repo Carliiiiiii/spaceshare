@@ -1914,7 +1914,20 @@ def main():
                     ]
                 )
                 with find_tab:
-                    show_listings(connection, user_id=user["id"])
+                    search_column, map_column = st.columns((4, 2), gap="large")
+                    with search_column:
+                        listings = show_listings(
+                            connection,
+                            include_map=False,
+                            user_id=user["id"],
+                        )
+                    with map_column:
+                        if listings:
+                            show_listing_map(
+                                listings,
+                                map_key="logged_in_listing_map",
+                                interactive=True,
+                            )
                 with my_listings_tab:
                     show_my_listings(connection, user["id"], user_email)
                 with saved_tab:
