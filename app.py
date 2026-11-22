@@ -328,6 +328,35 @@ def show_footer():
     )
 
 
+def show_authenticated_navigation(requests_label, chats_label):
+    """Keep the signed-in section in the URL so browser refresh preserves it."""
+    sections = [
+        ("find", "Find storage"),
+        ("listings", "My listings"),
+        ("saved", "♥ Saved"),
+        ("requests", requests_label),
+        ("chats", chats_label),
+        ("profile", "My profile"),
+    ]
+    section_keys = [key for key, _ in sections]
+    requested_section = st.query_params.get("section", "find")
+    if requested_section not in section_keys:
+        requested_section = "find"
+    selected_section = st.radio(
+        "Navigate",
+        section_keys,
+        index=section_keys.index(requested_section),
+        format_func=dict(sections).get,
+        horizontal=True,
+        key="authenticated_navigation",
+        label_visibility="collapsed",
+    )
+    if selected_section != requested_section:
+        st.query_params["section"] = selected_section
+        st.rerun()
+    return selected_section
+
+
 def show_login(connection, cookie_manager):
     st.subheader("Log in")
     with st.form("login_form"):
@@ -1833,27 +1862,18 @@ def main():
                 chats_label = "Chats"
                 if unread_count:
                     chats_label += " ①"
-                find_tab, my_listings_tab, saved_tab, requests_tab, chats_tab, profile_tab = st.tabs(
-                    [
-                        "Find storage",
-                        "My listings",
-                        "♥ Saved",
-                        requests_label,
-                        chats_label,
-                        "My profile",
-                    ]
-                )
-                with find_tab:
+                active_section = show_authenticated_navigation(requests_label, chats_label)
+                if active_section == "find":
                     show_listings(connection, user_id=user["id"])
-                with my_listings_tab:
+                elif active_section == "listings":
                     show_my_listings(connection, user["id"], user_email)
-                with saved_tab:
+                elif active_section == "saved":
                     show_saved_listings(connection, user["id"])
-                with requests_tab:
+                elif active_section == "requests":
                     show_rental_requests(connection, user["id"])
-                with chats_tab:
+                elif active_section == "chats":
                     show_chats(connection, user["id"])
-                with profile_tab:
+                elif active_section == "profile":
                     show_profile(connection, user)
             show_footer()
             return
