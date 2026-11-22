@@ -401,66 +401,6 @@ def show_footer():
     )
 
 
-def show_authenticated_navigation(requests_label, chats_label):
-    """Keep the active signed-in section after a browser refresh."""
-    sections = [
-        ("find", "Find storage"),
-        ("listings", "My listings"),
-        ("saved", "♥ Saved"),
-        ("requests", requests_label),
-        ("chats", chats_label),
-        ("profile", "My profile"),
-    ]
-    section_keys = [key for key, _ in sections]
-    requested_section = st.query_params.get("section", "find")
-    if requested_section not in section_keys:
-        requested_section = "find"
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stRadio"] > label { display: none; }
-        div[data-testid="stRadio"] > div {
-            flex-direction: row;
-            gap: 0.35rem;
-            border-bottom: 1px solid #D7E7EF;
-        }
-        div[data-testid="stRadio"] div[role="radiogroup"] { gap: 0.35rem; }
-        div[data-testid="stRadio"] div[role="radiogroup"] label {
-            border-bottom: 0.18rem solid transparent;
-            color: #17324D;
-            cursor: pointer;
-            font-weight: 600;
-            padding: 0.45rem 0.55rem 0.55rem;
-        }
-        div[data-testid="stRadio"] div[role="radiogroup"] label:hover {
-            color: #D95F1E;
-        }
-        div[data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) {
-            border-bottom-color: #F77B32;
-            color: #D95F1E;
-        }
-        div[data-testid="stRadio"] div[role="radiogroup"] label > div:first-child {
-            display: none;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    selected_section = st.radio(
-        "Navigate",
-        section_keys,
-        index=section_keys.index(requested_section),
-        format_func=dict(sections).get,
-        horizontal=True,
-        key="authenticated_navigation",
-        label_visibility="collapsed",
-    )
-    if selected_section != requested_section:
-        st.query_params["section"] = selected_section
-        st.rerun()
-    return selected_section
-
-
 def show_login(connection, cookie_manager):
     st.subheader("Log in")
     with st.form("login_form"):
@@ -1963,18 +1903,27 @@ def main():
                 chats_label = "Chats"
                 if unread_count:
                     chats_label += " ①"
-                active_section = show_authenticated_navigation(requests_label, chats_label)
-                if active_section == "find":
+                find_tab, my_listings_tab, saved_tab, requests_tab, chats_tab, profile_tab = st.tabs(
+                    [
+                        "Find storage",
+                        "My listings",
+                        "♥ Saved",
+                        requests_label,
+                        chats_label,
+                        "My profile",
+                    ]
+                )
+                with find_tab:
                     show_listings(connection, user_id=user["id"])
-                elif active_section == "listings":
+                with my_listings_tab:
                     show_my_listings(connection, user["id"], user_email)
-                elif active_section == "saved":
+                with saved_tab:
                     show_saved_listings(connection, user["id"])
-                elif active_section == "requests":
+                with requests_tab:
                     show_rental_requests(connection, user["id"])
-                elif active_section == "chats":
+                with chats_tab:
                     show_chats(connection, user["id"])
-                elif active_section == "profile":
+                with profile_tab:
                     show_profile(connection, user)
             show_footer()
             return
