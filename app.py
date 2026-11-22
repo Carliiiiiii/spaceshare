@@ -18,6 +18,7 @@ from supabase_backend import create_supabase_client
 from logic import (
     PUBLIC_LOCATION_DECIMAL_PLACES,
     cancel_rental_request,
+    block_user,
     create_rental_request,
     create_listing,
     delete_listing,
@@ -30,6 +31,7 @@ from logic import (
     mark_listing_conversation_messages_read,
     mark_messages_read,
     register_user,
+    report_content,
     update_display_name,
     update_user_profile,
     send_listing_conversation_message,
@@ -1287,6 +1289,28 @@ def show_listing_contact_actions(connection, listing):
         st.caption("This is your listing. You can edit it in My listings.")
         return
 
+    owner_id = db._get_listing_owner_id(connection, listing["id"])
+    safety_columns = st.columns(2)
+    with safety_columns[0]:
+        if st.button("Block user", key=f"block_listing_owner_{listing['id']}"):
+            try:
+                block_user(connection, user["id"], owner_id)
+            except (ValueError, PermissionError) as error:
+                st.error(str(error))
+            else:
+                st.success("User blocked. You can no longer contact each other.")
+                st.rerun()
+    with safety_columns[1]:
+        with st.popover("Report listing"):
+            report_reason = st.text_area("Reason", max_chars=500, key=f"report_listing_reason_{listing['id']}")
+            if st.button("Send report", key=f"report_listing_{listing['id']}"):
+                try:
+                    report_content(connection, user["id"], "listing", listing["id"], report_reason)
+                except ValueError as error:
+                    st.error(str(error))
+                else:
+                    st.success("Thanks. Your report was saved for review.")
+
     question_form_key = f"listing_question_open_{listing['id']}"
     if st.button("Chat about this listing", key=f"chat_listing_{listing['id']}"):
         st.session_state[question_form_key] = True
@@ -1487,6 +1511,16 @@ def show_listing_conversation_chat(connection, user_id, conversation):
                     st.markdown(f"**{sender_role}**")
                     st.caption(formatted_time)
                     st.write(message["message"])
+                if message["sender_id"] != user_id:
+                    with st.popover("Report message", use_container_width=False):
+                        reason = st.text_area("Reason", max_chars=500, key=f"report_listing_message_reason_{message['id']}")
+                        if st.button("Send report", key=f"report_listing_message_{message['id']}"):
+                            try:
+                                report_content(connection, user_id, "message", message["id"], reason)
+                            except ValueError as error:
+                                st.error(str(error))
+                            else:
+                                st.success("Message reported.")
         else:
             st.info("No messages yet.")
 
@@ -1541,6 +1575,16 @@ def show_request_chat(connection, user_id, request):
                     st.markdown(f"**{sender_role}**")
                     st.caption(formatted_time)
                     st.write(message["message"])
+                if message["sender_id"] != user_id:
+                    with st.popover("Report message", use_container_width=False):
+                        reason = st.text_area("Reason", max_chars=500, key=f"report_request_message_reason_{message['id']}")
+                        if st.button("Send report", key=f"report_request_message_{message['id']}"):
+                            try:
+                                report_content(connection, user_id, "message", message["id"], reason)
+                            except ValueError as error:
+                                st.error(str(error))
+                            else:
+                                st.success("Message reported.")
         else:
             st.info("No messages yet.")
 
