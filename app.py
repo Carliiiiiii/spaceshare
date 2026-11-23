@@ -3,6 +3,7 @@
 import base64
 import calendar
 import html
+from io import BytesIO
 from datetime import date, datetime, timedelta
 from math import asin, cos, radians, sin, sqrt
 from pathlib import Path
@@ -1501,6 +1502,17 @@ def show_rental_requests(connection, user_id):
                             st.rerun()
 
 
+def _chat_avatars(connection, messages):
+    """Load each sender's public photo once for the current chat render."""
+    avatars = {}
+    for sender_id in dict.fromkeys(message["sender_id"] for message in messages):
+        profile = db.get_public_user_profile(connection, sender_id)
+        photo_url = _row_value(profile, "profile_photo_url") if profile else None
+        photo_data = _row_value(profile, "profile_photo_data") if profile else None
+        avatars[sender_id] = photo_url or (BytesIO(photo_data) if photo_data else "👤")
+    return avatars
+
+
 def show_chats(connection, user_id):
     st.subheader("Chats")
     requests = db.get_rental_requests_for_user(connection, user_id)
@@ -1563,6 +1575,7 @@ def show_listing_conversation_chat(connection, user_id, conversation):
         mark_listing_conversation_messages_read(
             connection, conversation["id"], user_id
         )
+        avatars = _chat_avatars(connection, messages)
         if messages:
             for message in messages:
                 is_current_user = message["sender_id"] == user_id
@@ -1576,7 +1589,7 @@ def show_listing_conversation_chat(connection, user_id, conversation):
                     formatted_time = sent_at.strftime("%d %b %Y, %H:%M UTC")
                 except ValueError:
                     formatted_time = message["sent_at"]
-                with st.chat_message("user" if is_current_user else "assistant"):
+                with st.chat_message(sender_role, avatar=avatars[message["sender_id"]]):
                     st.markdown(f"**{sender_role}**")
                     st.caption(formatted_time)
                     st.write(message["message"])
@@ -1627,6 +1640,7 @@ def show_request_chat(connection, user_id, request):
         st.markdown(f"**{request['title']} · {other_name}**")
         messages = get_messages(connection, request["id"], user_id)
         mark_messages_read(connection, request["id"], user_id)
+        avatars = _chat_avatars(connection, messages)
         if messages:
             for message in messages:
                 is_current_user = message["sender_id"] == user_id
@@ -1640,7 +1654,7 @@ def show_request_chat(connection, user_id, request):
                     formatted_time = sent_at.strftime("%d %b %Y, %H:%M UTC")
                 except ValueError:
                     formatted_time = message["sent_at"]
-                with st.chat_message("user" if is_current_user else "assistant"):
+                with st.chat_message(sender_role, avatar=avatars[message["sender_id"]]):
                     st.markdown(f"**{sender_role}**")
                     st.caption(formatted_time)
                     st.write(message["message"])
