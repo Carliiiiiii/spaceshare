@@ -10,7 +10,7 @@ SpaceShare is a small English-language Streamlit web app for the Nova SBE progra
 ## Links
 
 - Public repository: https://github.com/Carliiiiiii/spaceshare
-- Public app: https://carliiiiiii-spaceshare-app-codexsupabase-storage-luv4lh.streamlit.app/
+- Public app: https://carliiiiiii-spaceshare-app-fznqzk.streamlit.app/
 
 ## Current features
 

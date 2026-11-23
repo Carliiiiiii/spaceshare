@@ -5,7 +5,7 @@
 The current published code is on `main`:
 
 - Repository: https://github.com/Carliiiiiii/spaceshare
-- App: https://carliiiiiii-spaceshare-app-codexsupabase-storage-luv4lh.streamlit.app/
+- App: https://carliiiiiii-spaceshare-app-fznqzk.streamlit.app/
 
 The interface and documentation are in English. Each account can both search for storage and offer storage.
 
