@@ -8,6 +8,17 @@ from streamlit.testing.v1 import AppTest
 import app
 
 
+def test_open_request_chat_selects_and_expands_request_chat(monkeypatch):
+    import streamlit as st
+
+    st.session_state["chat_tab_label"] = "Chats ①"
+    app._open_request_chat(42)
+
+    assert st.session_state["active_chat"] == "request_chat_42"
+    assert st.session_state["request_chat_42"] is True
+    assert st.session_state["main_navigation"] == "Chats ①"
+
+
 def _chat_page(kind):
     import streamlit as st
     import app

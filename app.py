@@ -1486,9 +1486,16 @@ def show_rental_requests(connection, user_id):
             f"{_format_date(request['end_date'])} — **{_rental_request_status_label(request)}**"
         )
         if request["owner_id"] == user_id and request["status"] == "pending":
-            columns = st.columns(2)
+            columns = st.columns(3)
+            with columns[0]:
+                st.button(
+                    "Open chat",
+                    key=f"open_request_chat_{request['id']}",
+                    on_click=_open_request_chat,
+                    args=(request["id"],),
+                )
             for column, status, label in zip(
-                columns,
+                columns[1:],
                 ("accepted", "rejected"),
                 ("Accept", "Reject"),
             ):
@@ -1559,6 +1566,14 @@ def show_chats(connection, user_id):
                 f"Status: {_rental_request_status_label(request)}"
             )
             show_request_chat(connection, user_id, request)
+
+
+def _open_request_chat(request_id):
+    """Select the Chats tab and expand one rental-request conversation."""
+    chat_key = f"request_chat_{request_id}"
+    st.session_state["active_chat"] = chat_key
+    st.session_state[chat_key] = True
+    st.session_state["main_navigation"] = st.session_state.get("chat_tab_label", "Chats")
 
 
 def _keep_chat_open(chat_key):
