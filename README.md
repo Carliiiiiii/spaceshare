@@ -66,7 +66,7 @@ Apply the SQL migrations in `supabase/migrations/` to the Supabase project befor
 uv run pytest -q
 ```
 
-Tests use isolated temporary SQLite databases. The latest local run completed with 92 passed and 2 skipped; the skipped tests are optional live Supabase concurrency tests that require dedicated test secrets.
+Tests use isolated temporary SQLite databases. The latest local run completed with 93 passed and 2 skipped; the skipped tests are optional live Supabase concurrency tests that require dedicated test secrets.
 
 The test suite covers accounts, password verification, persistence, listings, photos, filtering, profiles, ownership checks, rental-request validation, availability and overlap rules, private chats, unread messages, and invalid inputs.
 

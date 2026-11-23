@@ -81,7 +81,7 @@ For a two-account browser test:
 
 ## Verification before submission
 
-- Run `uv run pytest -q` on `main`. The latest local run completed with 92 passed and 2 skipped; the skipped tests are optional live Supabase concurrency tests requiring dedicated test secrets.
+- Run `uv run pytest -q` on `main`. The latest local run completed with 93 passed and 2 skipped; the skipped tests are optional live Supabase concurrency tests requiring dedicated test secrets.
 - Confirm that the Streamlit app uses the intended Supabase project and that all required migrations have been applied.
 - Check the Streamlit Secrets configuration without copying secrets into the repository.
 - Review the staged files and confirm that no `*.sqlite3`, `.env`, secrets, tokens, passwords, photos, or other local user data are included.
