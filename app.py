@@ -1561,8 +1561,23 @@ def show_chats(connection, user_id):
             show_request_chat(connection, user_id, request)
 
 
+def _keep_chat_open(chat_key):
+    st.session_state["active_chat"] = chat_key
+    st.session_state[chat_key] = True
+    st.session_state["main_navigation"] = st.session_state.get("chat_tab_label", "Chats")
+
+
+def _prepare_chat_input(chat_key, input_key):
+    if st.session_state.pop(f"{chat_key}_sent", False):
+        st.session_state[input_key] = ""
+        st.success("Message sent.")
+
+
 def show_listing_conversation_chat(connection, user_id, conversation):
-    with st.expander("Open chat"):
+    chat_key = f"listing_chat_{conversation['id']}"
+    input_key = f"listing_conversation_message_text_{conversation['id']}"
+    with st.expander("Open chat", key=chat_key, on_change="rerun"):
+        _prepare_chat_input(chat_key, input_key)
         other_name = (
             _chat_person_name(_row_value(conversation, "participant_name"), "Storage seeker")
             if conversation["owner_id"] == user_id
@@ -1610,9 +1625,14 @@ def show_listing_conversation_chat(connection, user_id, conversation):
             message_text = st.text_area(
                 "Message",
                 max_chars=1000,
-                key=f"listing_conversation_message_text_{conversation['id']}",
+                key=input_key,
             )
-            send_submitted = st.form_submit_button("Send message")
+            send_submitted = st.form_submit_button(
+                "Send message", on_click=_keep_chat_open, args=(chat_key,)
+            )
+            st.form_submit_button(
+                "Refresh messages", on_click=_keep_chat_open, args=(chat_key,)
+            )
         if send_submitted:
             try:
                 send_listing_conversation_message(
@@ -1621,17 +1641,16 @@ def show_listing_conversation_chat(connection, user_id, conversation):
             except (ValueError, PermissionError) as error:
                 st.error(str(error))
             else:
-                st.success("Message sent.")
+                st.session_state[f"{chat_key}_sent"] = True
+                st.rerun()
 
-        if st.button(
-            "Refresh messages",
-            key=f"refresh_listing_conversation_{conversation['id']}",
-        ):
-            st.rerun()
 
 
 def show_request_chat(connection, user_id, request):
-    with st.expander("Open chat"):
+    chat_key = f"request_chat_{request['id']}"
+    input_key = f"message_text_{request['id']}"
+    with st.expander("Open chat", key=chat_key, on_change="rerun"):
+        _prepare_chat_input(chat_key, input_key)
         other_name = (
             _chat_person_name(_row_value(request, "requester_name"), "Storage seeker")
             if request["owner_id"] == user_id
@@ -1675,19 +1694,23 @@ def show_request_chat(connection, user_id, request):
             message_text = st.text_area(
                 "Message",
                 max_chars=1000,
-                key=f"message_text_{request['id']}",
+                key=input_key,
             )
-            send_submitted = st.form_submit_button("Send message")
+            send_submitted = st.form_submit_button(
+                "Send message", on_click=_keep_chat_open, args=(chat_key,)
+            )
+            st.form_submit_button(
+                "Refresh messages", on_click=_keep_chat_open, args=(chat_key,)
+            )
         if send_submitted:
             try:
                 send_message(connection, request["id"], user_id, message_text)
             except (ValueError, PermissionError) as error:
                 st.error(str(error))
             else:
-                st.success("Message sent.")
+                st.session_state[f"{chat_key}_sent"] = True
+                st.rerun()
 
-        if st.button("Refresh messages", key=f"refresh_messages_{request['id']}"):
-            st.rerun()
 
 
 def show_my_listings(connection, owner_id, user_email):
@@ -1917,6 +1940,10 @@ def main():
                 chats_label = "Chats"
                 if unread_count:
                     chats_label += " ①"
+                previous_chat_label = st.session_state.get("chat_tab_label", "Chats")
+                if st.session_state.get("main_navigation") == previous_chat_label:
+                    st.session_state["main_navigation"] = chats_label
+                st.session_state["chat_tab_label"] = chats_label
                 find_tab, my_listings_tab, saved_tab, requests_tab, chats_tab, profile_tab = st.tabs(
                     [
                         "Find storage",
@@ -1925,7 +1952,9 @@ def main():
                         requests_label,
                         chats_label,
                         "My profile",
-                    ]
+                    ],
+                    key="main_navigation",
+                    on_change="rerun",
                 )
                 with find_tab:
                     search_column, map_column = st.columns((4, 2), gap="large")
