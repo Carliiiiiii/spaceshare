@@ -93,11 +93,17 @@ def get_connection():
 
     if has_supabase_settings:
         try:
-            return create_supabase_client(st.secrets)
+            return _get_cached_supabase_connection(st.secrets)
         except Exception as error:
             st.error(f"Online database configuration error: {error}")
             st.stop()
     return db.connect(DATABASE_PATH)
+
+
+@st.cache_resource(show_spinner=False)
+def _get_cached_supabase_connection(_secrets):
+    """Reuse the hosted Supabase client across Streamlit reruns."""
+    return create_supabase_client(_secrets)
 
 
 def get_cookie_manager():
