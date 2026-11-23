@@ -397,7 +397,7 @@ def _format_date(value):
 def show_footer():
     """Show the shared, minimal application footer."""
     st.markdown(
-        '<div class="spaceshare-footer">SpaceShare · Storage made simple</div>',
+        '<div class="spaceshare-footer">SpaceShare · Storage space, simply found.</div>',
         unsafe_allow_html=True,
     )
 
