@@ -4,10 +4,8 @@ SpaceShare is a small English-language Streamlit web app for the Nova SBE progra
 
 ## Team
 
-Add the two team members and student numbers before submitting the project:
-
-- Name — student number
-- Name — student number
+- Carla Wischerhoff — 83442
+- Nele Wittkopf — 81811
 
 ## Links
 
@@ -24,6 +22,7 @@ Add the two team members and student numbers before submitting the project:
 - Set and edit a public display name, profile description, and optional profile photo. E-mail addresses are not used as public names.
 - Create, edit, and delete only the listings owned by the signed-in user.
 - Add, replace, or remove an optional validated JPG/PNG listing photo up to 5 MB.
+- Set and edit an optional public profile photo as a validated JPG/PNG up to 5 MB. HEIC/HEIF iPhone files are not supported directly; export them as JPG or PNG first.
 - Send rental requests with a start date, end date, and status.
 - Accept or reject pending requests as the listing owner and cancel a request as its requester.
 - Prevent overlapping accepted rentals while allowing directly adjacent periods. Pending and rejected requests do not block availability.
@@ -67,7 +66,7 @@ Apply the SQL migrations in `supabase/migrations/` to the Supabase project befor
 uv run pytest -q
 ```
 
-Tests use isolated temporary SQLite databases. Optional Supabase concurrency tests run only when dedicated test secrets are configured.
+Tests use isolated temporary SQLite databases. The latest local run completed with 92 passed and 2 skipped; the skipped tests are optional live Supabase concurrency tests that require dedicated test secrets.
 
 The test suite covers accounts, password verification, persistence, listings, photos, filtering, profiles, ownership checks, rental-request validation, availability and overlap rules, private chats, unread messages, and invalid inputs.
 
@@ -91,8 +90,10 @@ The interface collects input and displays results, `logic.py` validates and appl
 ## Known limitations and next steps
 
 - Payments, automated e-mails, exact-address sharing, and a legal booking contract are outside the current course-project scope.
-- Supabase backups, retention rules, and production monitoring still need to be documented for a long-term public service.
-- Before submission, confirm the public URL, team names and student numbers, migration state, secrets, and the final test result on `main`.
+- Supabase backups, retention rules, and production monitoring are not configured for a long-term public service.
+- HEIC/HEIF image uploads are not supported; users must convert iPhone photos to JPG or PNG.
+- The repository contains hosted database migrations, but the original baseline schema is not represented by one complete initial migration. The deployed Supabase schema was checked manually.
+- Before submission, confirm the public URL, migration state, secrets, and the final test result on `main`.
 
 ## Repository and data safety
 

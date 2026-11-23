@@ -9,6 +9,11 @@ The current published code is on `main`:
 
 The interface and documentation are in English. Each account can both search for storage and offer storage.
 
+## Team
+
+- Carla Wischerhoff — student number 83442
+- Nele Wittkopf — student number 81811
+
 ## Implemented functionality
 
 ### Accounts and profiles
@@ -16,6 +21,7 @@ The interface and documentation are in English. Each account can both search for
 - Registration, login, logout, and refresh-persistent signed sessions.
 - Argon2 password hashing; passwords are not logged or stored in plain text.
 - Public display name, short profile description, optional profile photo, and verification-request status.
+- Profile photos must be real JPG or PNG images up to 5 MB. HEIC/HEIF iPhone files are not accepted directly and must be exported first.
 - Existing accounts without a display name use a role-based fallback in chat: `Storage seeker` or `Storage owner`.
 - E-mail addresses remain private and are not used as public names.
 
@@ -75,11 +81,13 @@ For a two-account browser test:
 
 ## Verification before submission
 
-- Run `uv run pytest -q` on `main`.
+- Run `uv run pytest -q` on `main`. The latest local run completed with 92 passed and 2 skipped; the skipped tests are optional live Supabase concurrency tests requiring dedicated test secrets.
 - Confirm that the Streamlit app uses the intended Supabase project and that all required migrations have been applied.
 - Check the Streamlit Secrets configuration without copying secrets into the repository.
 - Review the staged files and confirm that no `*.sqlite3`, `.env`, secrets, tokens, passwords, photos, or other local user data are included.
 - Confirm that the public URL, both team names, and both student numbers are present in `README.md`.
+
+The repository contains hosted database migrations, but not one complete initial migration for the original baseline schema. The deployed Supabase schema was checked manually; this is a documentation limitation rather than a user-facing feature.
 
 ## Privacy and security notes
 
@@ -96,3 +104,5 @@ The public demonstration uses test accounts. No real personal data should be use
 ## Remaining limitations
 
 The project does not implement payments, automated e-mail notifications, identity verification, exact-address sharing, or a legally binding contract. These are outside the current small course-project scope unless the team chooses one as a future extension.
+
+Supabase backups, retention rules, and production monitoring are not configured as a production service. The public demonstration should use fictional accounts, listings, photos, and messages only.
