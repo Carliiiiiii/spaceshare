@@ -92,7 +92,6 @@ The interface collects input and displays results, `logic.py` validates and appl
 - Payments, automated e-mails, exact-address sharing, and a legal booking contract are outside the current course-project scope.
 - Supabase backups, retention rules, and production monitoring are not configured for a long-term public service.
 - HEIC/HEIF image uploads are not supported; users must convert iPhone photos to JPG or PNG.
-- The repository contains hosted database migrations, but the original baseline schema is not represented by one complete initial migration. The deployed Supabase schema was checked manually.
 - Before submission, confirm the public URL, migration state, secrets, and the final test result on `main`.
 
 ## Repository and data safety
